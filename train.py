@@ -1,0 +1,430 @@
+import os
+import argparse
+import yaml
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+import torch.multiprocessing as mp
+
+import pytorch_lightning as pl
+from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+
+from torch_harmonics import RealSHT
+from torch_harmonics.examples import PdeDataset
+from torch_harmonics.examples.losses import (
+    SquaredL2LossS2,
+    L1LossS2,
+    L2LossS2,
+    W11LossS2,
+)
+from torch_harmonics.examples.models.sfno import SphericalFourierNeuralOperator
+from torch_harmonics.examples.models.s2transformer import SphericalTransformer
+
+from paradis import ParadisModel
+
+
+def load_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def update_config_from_args(config, unknown_args):
+    """Update config with command-line arguments in dot notation."""
+    for i in range(0, len(unknown_args), 2):
+        if i + 1 >= len(unknown_args):
+            break
+
+        key = unknown_args[i].lstrip("-")
+        val = unknown_args[i + 1]
+
+        # Navigate through nested config
+        keys = key.split(".")
+        current = config
+        for k in keys[:-1]:
+            if k not in current:
+                current[k] = {}
+            current = current[k]
+
+        # Type conversion
+        try:
+            if "." in val:
+                val = float(val)
+            else:
+                val = int(val)
+        except ValueError:
+            # Keep as string if not numeric
+            pass
+
+        current[keys[-1]] = val
+
+    return config
+
+
+class SWELightningModule(pl.LightningModule):
+    """Unified Lightning Module for both SFNO and Transformer models."""
+
+    def __init__(self, config):
+        super().__init__()
+        self.save_hyperparameters(config)
+        self.config = config
+
+        self.nlat = config["data"]["nlat"]
+        self.nlon = config["data"]["nlon"]
+        self.grid = config["data"]["grid"]
+        self.model_type = config["experiment"]["model_type"]
+
+        # Initialize the appropriate model
+        if self.model_type == "sfno":
+            self.model = self._create_sfno_model()
+        elif self.model_type == "transformer":
+            self.model = self._create_transformer_model()
+        elif self.model_type == "paradis":
+            self.model = self._create_paradis_model()
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")
+
+        # Loss function
+        self.loss_fn = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
+
+        # Metrics
+        self.metric_l1 = L1LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
+        self.metric_l2 = L2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
+        self.metric_w11 = W11LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
+
+        # Training state
+        self.nfuture = 0  # Number of autoregressive steps during training
+
+    def _create_sfno_model(self):
+        """Create SFNO model."""
+        if "sfno" not in self.config["model"]:
+            raise ValueError(
+                "SFNO model config not found. Use config_sfno.yaml or add 'model.sfno' section."
+            )
+
+        model_config = self.config["model"]["sfno"]
+        return SphericalFourierNeuralOperator(
+            img_size=(self.nlat, self.nlon),
+            grid=self.grid,
+            grid_internal=self.grid,
+            scale_factor=model_config["scale_factor"],
+            in_chans=3,
+            out_chans=3,
+            embed_dim=model_config["embed_dim"],
+            num_layers=model_config["num_layers"],
+            normalization_layer=model_config["normalization_layer"],
+            use_mlp=model_config["use_mlp"],
+            mlp_ratio=model_config["mlp_ratio"],
+            drop_rate=model_config["dropout"],
+            hard_thresholding_fraction=model_config["hard_thresholding_fraction"],
+            residual_prediction=True,
+        )
+
+    def _create_transformer_model(self):
+        """Create Spherical Transformer model."""
+        if "transformer" not in self.config["model"]:
+            raise ValueError(
+                "Transformer model config not found. Use config_transformer.yaml or add 'model.transformer' section."
+            )
+
+        model_config = self.config["model"]["transformer"]
+        return SphericalTransformer(
+            img_size=(self.nlat, self.nlon),
+            grid=self.grid,
+            scale_factor=model_config["scale_factor"],
+            in_chans=3,
+            out_chans=3,
+            embed_dim=model_config["embed_dim"],
+            num_layers=model_config["num_layers"],
+            num_heads=model_config["num_heads"],
+            use_mlp=model_config["use_mlp"],
+            mlp_ratio=model_config["mlp_ratio"],
+            drop_rate=model_config["dropout"],
+            drop_path_rate=model_config["drop_path"],
+            pos_embed=model_config["pos_embed"],
+        )
+
+    def _create_paradis_model(self):
+        """Create PARADIS model."""
+        if "paradis" not in self.config["model"]:
+            raise ValueError(
+                "PARADIS model config not found. Use config_paradis.yaml or add 'model.paradis' section."
+            )
+
+        return ParadisModel(self.config)
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        inp, tar = batch
+
+        # Autoregressive rollout during training
+        prd = self.model(inp)
+        for _ in range(self.nfuture):
+            prd = self.model(prd)
+
+        loss = self.loss_fn(prd, tar)
+
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        inp, tar = batch
+
+        # Autoregressive rollout during validation
+        prd = self.model(inp)
+        for _ in range(self.nfuture):
+            prd = self.model(prd)
+
+        loss = self.loss_fn(prd, tar)
+
+        # Calculate metrics
+        l1 = self.metric_l1(prd, tar)
+        l2 = self.metric_l2(prd, tar)
+        w11 = self.metric_w11(prd, tar)
+
+        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("val_l1", l1, sync_dist=True)
+        self.log("val_l2", l2, sync_dist=True)
+        self.log("val_w11", w11, sync_dist=True)
+
+        return loss
+
+    def configure_optimizers(self):
+        lr = self.config["training"]["learning_rate"]
+
+        # Reduce learning rate for finetuning
+        if self.nfuture > 0:
+            lr = self.config["training"]["finetune_learning_rate"]
+
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=5
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {"scheduler": scheduler, "monitor": "val_loss"},
+        }
+
+    def on_load_checkpoint(self, checkpoint):
+        """Filter out problematic keys during checkpoint loading."""
+        state_dict = checkpoint["state_dict"]
+        keys_to_remove = ["metric_w11.k_phi_mesh", "metric_w11.k_theta_mesh"]
+        for k in keys_to_remove:
+            if k in state_dict:
+                del state_dict[k]
+
+
+def create_datasets(config, device):
+    """Create training and validation datasets."""
+    dt = config["data"]["dt"]
+    dt_solver = config["data"]["dt_solver"]
+    nsteps = dt // dt_solver
+    nlat = config["data"]["nlat"]
+    nlon = config["data"]["nlon"]
+    grid = config["data"]["grid"]
+
+    # Training dataset
+    train_dataset = PdeDataset(
+        dt=dt,
+        nsteps=nsteps,
+        dims=(nlat, nlon),
+        grid=grid,
+        normalize=True,
+        device=device,
+    )
+    train_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
+    train_dataset.set_initial_condition("random")
+    train_dataset.set_num_examples(config["data"]["num_train_examples"])
+
+    # Validation dataset
+    val_dataset = PdeDataset(
+        dt=dt,
+        nsteps=nsteps,
+        dims=(nlat, nlon),
+        grid=grid,
+        normalize=True,
+        device=device,
+    )
+    val_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
+    val_dataset.set_initial_condition("random")
+    val_dataset.set_num_examples(config["data"]["num_val_examples"])
+
+    return train_dataset, val_dataset
+
+
+def main():
+    # Parse arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config", type=str, default="config.yaml", help="Path to config file"
+    )
+    parser.add_argument(
+        "--resume_from",
+        type=str,
+        default=None,
+        help="Checkpoint to resume from (for finetuning only)",
+    )
+
+    known_args, unknown_args = parser.parse_known_args()
+
+    mp.set_start_method("spawn", force=True)
+
+    # Load and update config
+    config = load_config(known_args.config)
+    config = update_config_from_args(config, unknown_args)
+
+    # Setup
+    torch.set_float32_matmul_precision("high")
+    pl.seed_everything(config["experiment"]["seed"], workers=True)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    print(f"Model type: {config['experiment']['model_type']}")
+
+    # Create datasets
+    train_dataset, val_dataset = create_datasets(config, device)
+
+    # Create data loaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config["data"]["batch_size"],
+        shuffle=True,
+        num_workers=config["data"]["num_workers"],
+        persistent_workers=(config["data"]["num_workers"] > 0),
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config["data"]["batch_size"],
+        shuffle=False,
+        num_workers=config["data"]["num_workers"],
+        persistent_workers=(config["data"]["num_workers"] > 0),
+    )
+
+    # Initialize model
+    model = SWELightningModule(config)
+
+    # Determine precision
+    precision = 32
+    if config["training"]["amp_mode"] == "fp16":
+        precision = 16
+    elif config["training"]["amp_mode"] == "bf16":
+        precision = "bf16"
+
+    # ========== PHASE 1: PRETRAINING ==========
+    if config["training"]["pretrain_epochs"] > 0 and known_args.resume_from is None:
+        print("\n" + "=" * 70)
+        print(
+            f"STARTING PRETRAINING FOR {config['training']['pretrain_epochs']} EPOCHS"
+        )
+        print("=" * 70 + "\n")
+
+        logger = TensorBoardLogger(
+            config["training"]["save_dir"], name=config["experiment"]["name"]
+        )
+
+        checkpoint_callback = ModelCheckpoint(
+            monitor="val_loss",
+            filename="pretrain-{epoch:02d}-{val_loss:.4f}",
+            save_top_k=1,
+            mode="min",
+            save_last=True,
+        )
+
+        lr_monitor = LearningRateMonitor(logging_interval="epoch")
+
+        trainer = pl.Trainer(
+            max_epochs=config["training"]["pretrain_epochs"],
+            logger=logger,
+            callbacks=[checkpoint_callback, lr_monitor],
+            accelerator="gpu" if torch.cuda.is_available() else "cpu",
+            devices=1,
+            precision=precision,
+            log_every_n_steps=config["training"]["log_every_n_steps"],
+            check_val_every_n_epoch=1,
+            enable_progress_bar=True,
+        )
+
+        trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+
+        print(f"\nBest pretrain checkpoint: {checkpoint_callback.best_model_path}")
+    elif known_args.resume_from is not None:
+        print("\n" + "=" * 70)
+        print(f"SKIPPING PRETRAINING - Loading checkpoint: {known_args.resume_from}")
+        print("=" * 70 + "\n")
+
+        checkpoint = torch.load(known_args.resume_from, map_location=device)
+        state_dict = checkpoint["state_dict"]
+
+        # Remove problematic keys
+        keys_to_ignore = ["metric_w11.k_phi_mesh", "metric_w11.k_theta_mesh"]
+        for key in keys_to_ignore:
+            if key in state_dict:
+                del state_dict[key]
+
+        model.load_state_dict(state_dict, strict=False)
+        print("Checkpoint loaded successfully.\n")
+
+    # ========== PHASE 2: FINETUNING ==========
+    if config["training"]["finetune_epochs"] > 0:
+        print("\n" + "=" * 70)
+        print(f"STARTING FINETUNING FOR {config['training']['finetune_epochs']} EPOCHS")
+        print("=" * 70 + "\n")
+
+        # Update datasets for 2-step prediction
+        dt = config["data"]["dt"]
+        dt_solver = config["data"]["dt_solver"]
+        new_nsteps = 2 * dt // dt_solver
+        train_dataset.nsteps = new_nsteps
+        val_dataset.nsteps = new_nsteps
+
+        # Update model for autoregressive training
+        model.nfuture = 1
+
+        # Separate logger for finetuning
+        finetune_logger = TensorBoardLogger(
+            config["training"]["save_dir"],
+            name=f"{config['experiment']['name']}_finetune",
+        )
+
+        finetune_checkpoint = ModelCheckpoint(
+            monitor="val_loss",
+            filename="finetune-{epoch:02d}-{val_loss:.4f}",
+            save_top_k=1,
+            mode="min",
+            save_last=True,
+        )
+
+        finetune_lr_monitor = LearningRateMonitor(logging_interval="epoch")
+
+        finetune_trainer = pl.Trainer(
+            max_epochs=config["training"]["finetune_epochs"],
+            logger=finetune_logger,
+            callbacks=[finetune_checkpoint, finetune_lr_monitor],
+            accelerator="gpu" if torch.cuda.is_available() else "cpu",
+            devices=1,
+            precision=precision,
+            log_every_n_steps=config["training"]["log_every_n_steps"],
+            check_val_every_n_epoch=1,
+            enable_progress_bar=True,
+        )
+
+        finetune_trainer.fit(
+            model, train_dataloaders=train_loader, val_dataloaders=val_loader
+        )
+
+        print(f"\nBest finetune checkpoint: {finetune_checkpoint.best_model_path}")
+
+    print("\n" + "=" * 70)
+    print("TRAINING COMPLETE")
+    print("=" * 70)
+
+
+if __name__ == "__main__":
+    main()

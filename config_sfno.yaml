@@ -1,0 +1,35 @@
+experiment:
+  name: "spherical_swe_sfno"
+  seed: 42
+  model_type: "sfno"
+
+data:
+  nlat: 128
+  nlon: 256
+  dt: 1800              # Time step for the model (30 mins)
+  dt_solver: 150        # Time step for the underlying solver
+  batch_size: 4
+  num_workers: 0        
+  grid: "legendre-gauss"
+  num_train_examples: 256
+  num_val_examples: 32
+
+model:
+  sfno:
+    scale_factor: 1
+    embed_dim: 32
+    num_layers: 2
+    normalization_layer: "instance_norm"
+    hard_thresholding_fraction: 1.0
+    use_mlp: true
+    mlp_ratio: 2.0
+    dropout: 0.0
+
+training:
+  learning_rate: 1.0e-3
+  finetune_learning_rate: 1.0e-4
+  pretrain_epochs: 100
+  finetune_epochs: 10
+  amp_mode: "none"      # Options: "none", "fp16", "bf16"
+  log_every_n_steps: 10
+  save_dir: "./logs"
