@@ -15,42 +15,28 @@ class GeoCyclicPadding(torch.nn.Module):
         self.pad_width = pad_width
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-            """Apply cyclic padding to the input tensor."""
-            # Validate input dimensions
-            assert (
-                len(x.shape) == 4
-            ), "Input must be 4-dimensional [batch, channels, lat, lon]"
-            batch_size, channels, height, width = x.shape
-            assert width % 2 == 0, "Number of longitude points must be even"
-    
-            # For latitude padding, we need to rotate by 180° and account for longitude padding
-            middle_index = width // 2
-    
-            # Take rows 1 to pad+1 (skipping row 0/South Pole)
-            top_source = x[:, :, 1 : self.pad_width + 1, :] 
-            
-            # Take rows -(pad+1) to -1 (skipping row -1/North Pole)
-            bottom_source = x[:, :, -(self.pad_width + 1) : -1, :] 
-            
-            # Apply 180° shift
-            top_padding = torch.roll(top_source, shifts=middle_index, dims=3)
-            bottom_padding = torch.roll(bottom_source, shifts=middle_index, dims=3)
-            
-            # Flip and Concatenate
-            # The flip(2) correctly orders them: e.g., [89, 88] -> [88, 89] (ghosts above 90)
-            x = torch.cat([top_padding.flip(2), x, bottom_padding.flip(2)], dim=2)
-    
-            # Longitude periodic padding
-            x_padded = torch.cat(
-                [x[:, :, :, -self.pad_width :], x, x[:, :, :, : self.pad_width]], dim=3
-            )
-    
-            return x_padded
+        """Apply cyclic padding to the input tensor."""
+        assert (
+            len(x.shape) == 4
+        ), "Input must be 4-dimensional [batch, channels, lat, lon]"
+        batch_size, channels, height, width = x.shape
+        assert width % 2 == 0, "Number of longitude points must be even"
 
+        middle_index = width // 2
 
+        top_source = x[:, :, 1 : self.pad_width + 1, :]
+        bottom_source = x[:, :, -(self.pad_width + 1) : -1, :]
 
+        top_padding = torch.roll(top_source, shifts=middle_index, dims=3)
+        bottom_padding = torch.roll(bottom_source, shifts=middle_index, dims=3)
 
+        x = torch.cat([top_padding.flip(2), x, bottom_padding.flip(2)], dim=2)
 
+        x_padded = torch.cat(
+            [x[:, :, :, -self.pad_width :], x, x[:, :, :, : self.pad_width]], dim=3
+        )
+
+        return x_padded
 
 
 class CLinear(nn.Module):
@@ -65,7 +51,6 @@ class CLinear(nn.Module):
         bias: bool = True,
     ):
         super().__init__()
-        # Kernel size is ignored or strictly 1 for CLinear
         self.layer = nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -151,7 +136,6 @@ class GlobalBias(nn.Module):
         return x
 
 
-# Registry of available blocks for string lookup
 BLOCK_REGISTRY = {
     "SepConv": SepConv,
     "CLinear": CLinear,
@@ -162,14 +146,13 @@ BLOCK_REGISTRY = {
 
 class GMBlock(nn.Sequential):
     """
-    GMBlock: Generic Multilayer Block.
+    Generic Multilayer Block.
     Composes several simple blocks with activation functions.
-    Matches original logic: Hidden layers have activation by default.
     """
 
     def __init__(
         self,
-        layers: Sequence[Union[str, Type[nn.Module]]],  # List of layer types or names
+        layers: Sequence[Union[str, Type[nn.Module]]],
         input_dim: int,
         output_dim: int,
         mesh_size: Tuple[int, int],
@@ -177,9 +160,7 @@ class GMBlock(nn.Sequential):
         hidden_dim: Union[Sequence, int] = 0,
         activation_fn: Type[nn.Module] = nn.SiLU,
         bias_channels: int = 0,
-        activation: Union[
-            Sequence, bool
-        ] = False,  # False means 'disable ONLY on last layer'
+        activation: Union[Sequence, bool] = False,
         pre_normalize: bool = False,
     ):
         num_layers = len(layers)
@@ -200,7 +181,6 @@ class GMBlock(nn.Sequential):
 
         blocks = []
 
-        # Optional Pre-normalization
         if pre_normalize:
             blocks.append(
                 (
@@ -209,11 +189,9 @@ class GMBlock(nn.Sequential):
                 )
             )
 
-        # Build Layers
         layer_in_size = input_dim
 
         for idx, l in enumerate(layers):
-            # Resolve layer type from string or class
             if isinstance(l, str):
                 if l not in BLOCK_REGISTRY:
                     raise ValueError(
@@ -223,13 +201,11 @@ class GMBlock(nn.Sequential):
             else:
                 ltype = l
 
-            # Determine output size for this specific layer
             if idx == num_layers - 1:
                 layer_out_size = output_dim
             else:
                 layer_out_size = hidden_dim[idx]
 
-            # Construct the layer
             layer_name = f"{idx}-{ltype.__name__}"
             layer_obj = ltype(
                 input_dim=layer_in_size,
@@ -239,7 +215,6 @@ class GMBlock(nn.Sequential):
             )
             blocks.append((layer_name, layer_obj))
 
-            # Optional Global Bias (only after first layer if requested)
             if idx == 0 and bias_channels > 0:
                 blocks.append(
                     (
@@ -252,11 +227,9 @@ class GMBlock(nn.Sequential):
                     )
                 )
 
-            # Activation
             if activation[idx]:
                 blocks.append((f"{idx}-{activation_fn.__name__}", activation_fn()))
 
-            # Update input size for next iteration
             layer_in_size = layer_out_size
 
         super().__init__(OrderedDict(blocks))
@@ -317,7 +290,6 @@ class NeuralSemiLagrangian(nn.Module):
 
         H, W = mesh_size
 
-        # Store for later use
         self.register_buffer(
             "lat_grid", lat_grid.unsqueeze(0).unsqueeze(0).contiguous().clone()
         )
@@ -325,7 +297,6 @@ class NeuralSemiLagrangian(nn.Module):
             "lon_grid", lon_grid.unsqueeze(0).unsqueeze(0).contiguous().clone()
         )
 
-        # Buffers: normalization constants
         self.register_buffer("Hf", torch.tensor(float(H)))
         self.register_buffer("Wf", torch.tensor(float(W)))
         self.register_buffer("pad", torch.tensor(float(self.padding)))
@@ -360,7 +331,6 @@ class NeuralSemiLagrangian(nn.Module):
         den = cos_lat_prime * cos_lon_prime * cos_lat_p - sin_lat_prime * sin_lat_p
         lon = lon_p + torch.atan2(num, den)
 
-        # Normalize longitude to [0, 2π]
         lon = torch.remainder(lon + 2 * torch.pi, 2 * torch.pi)
 
         return lat, lon
@@ -385,7 +355,6 @@ class NeuralSemiLagrangian(nn.Module):
         lon_prime = -u * dt
         lat_prime = -v * dt
 
-        # Expand grids to match batch and num_vels dimensions
         lat_grid = self.lat_grid.expand(batch_size, self.num_vels, -1, -1)
         lon_grid = self.lon_grid.expand(batch_size, self.num_vels, -1, -1)
 
@@ -393,7 +362,6 @@ class NeuralSemiLagrangian(nn.Module):
             lat_prime, lon_prime, lat_grid, lon_grid
         )
 
-        # Convert departure points to pixel locations
         pix_x = (lon_dep - self.min_lon) / self.d_lon * (self.Wf - 1.0)
         pix_y = (lat_dep - self.min_lat) / self.d_lat * (self.Hf - 1.0)
 
@@ -420,7 +388,7 @@ class NeuralSemiLagrangian(nn.Module):
         interpolated = torch.nn.functional.grid_sample(
             dynamic_padded,
             grid,
-            align_corners=True,  
+            align_corners=True,
             mode=self.interpolation,
             padding_mode="zeros",
         )
@@ -444,7 +412,6 @@ class ParadisModel(nn.Module):
         self.nlon = config["data"]["nlon"]
         self.grid = config["data"]["grid"]
 
-        # Validate grid type
         if self.grid != "equiangular":
             raise ValueError(
                 f"Paradis model only supports 'equiangular' grid, got '{self.grid}'. "
@@ -455,7 +422,6 @@ class ParadisModel(nn.Module):
 
         model_config = config["model"]["paradis"]
 
-        # Get channel sizes directly from config
         hidden_dim = model_config["hidden_dim"]
         num_vels = model_config["num_vels"]
         diffusion_size = model_config["diffusion_size"]
@@ -464,22 +430,16 @@ class ParadisModel(nn.Module):
         adv_interpolation = model_config["interpolation"]
         bias_channels = model_config.get("bias_channels", 4)
 
-        # Create latitude and longitude grids for equiangular grid
-        dlat = 180.0 / (self.nlat - 1)  # Spacing changes because endpoints are included
+        dlat = 180.0 / (self.nlat - 1)
         dlon = 360.0 / self.nlon
 
-        # Generate latitude including -90 and 90 exactly
         lat = torch.linspace(-90, 90, self.nlat, dtype=torch.float32)
-
         lon = torch.linspace(0, 360 - dlon, self.nlon, dtype=torch.float32)
 
-        # Create 2D meshgrids and convert to radians
-        # Use indexing='ij' to get (nlat, nlon) directly
         lat_grid, lon_grid = torch.meshgrid(lat, lon, indexing="ij")
         lat_grid = torch.deg2rad(lat_grid)
         lon_grid = torch.deg2rad(lon_grid)
 
-        # Input projection (3 channels -> hidden_dim)
         self.input_proj = GMBlock(
             layers=["SepConv"] * 2,
             input_dim=3,
@@ -490,12 +450,10 @@ class ParadisModel(nn.Module):
             pre_normalize=True,
         )
 
-        # Rescale the time step
         self.num_layers = max(1, model_config["num_layers"])
         dt = config["data"]["dt"]
         self.dt = dt / self.SYNOPTIC_TIME_SCALE / self.num_layers
 
-        # Advection layer
         self.advection = nn.ModuleList(
             [
                 NeuralSemiLagrangian(
@@ -511,7 +469,6 @@ class ParadisModel(nn.Module):
             ]
         )
 
-        # Diffusion-reaction layers
         self.diffusion = nn.ModuleList(
             [
                 GMBlock(
@@ -543,7 +500,6 @@ class ParadisModel(nn.Module):
             ]
         )
 
-        # Output projection (hidden_dim -> 3 channels)
         self.output_proj = GMBlock(
             layers=["SepConv", "CLinear"],
             input_dim=hidden_dim,
@@ -559,7 +515,7 @@ class ParadisModel(nn.Module):
         return self.diffusion[i](z) + self.reaction[i](z)
 
     def _step(self, z: torch.Tensor, i: int) -> torch.Tensor:
-        # Lie-Trotter splitting with RK2 on diffusion and reaction layers
+        """Lie-Trotter splitting with RK2 on diffusion and reaction layers."""
         zadv = self.advection[i](z, self.dt)
         k1 = self._DR(zadv, i)
         zmid = zadv + 0.5 * self.dt * k1
@@ -567,13 +523,10 @@ class ParadisModel(nn.Module):
         return zadv + self.dt * k2
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Project features to latent space
         z = self.input_proj(x)
         z0 = z.clone()
 
-        # Compute advection and diffusion-reaction
         for i in range(self.num_layers):
             z = self._step(z, i)
 
-        # Residual connection: input + change
         return x + self.output_proj(z - z0)

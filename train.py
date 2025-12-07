@@ -41,7 +41,6 @@ def update_config_from_args(config, unknown_args):
         key = unknown_args[i].lstrip("-")
         val = unknown_args[i + 1]
 
-        # Navigate through nested config
         keys = key.split(".")
         current = config
         for k in keys[:-1]:
@@ -49,14 +48,12 @@ def update_config_from_args(config, unknown_args):
                 current[k] = {}
             current = current[k]
 
-        # Type conversion
         try:
             if "." in val:
                 val = float(val)
             else:
                 val = int(val)
         except ValueError:
-            # Keep as string if not numeric
             pass
 
         current[keys[-1]] = val
@@ -65,7 +62,7 @@ def update_config_from_args(config, unknown_args):
 
 
 class SWELightningModule(pl.LightningModule):
-    """Unified Lightning Module for both SFNO and Transformer models."""
+    """Unified Lightning Module for SFNO, Transformer, and Paradis models."""
 
     def __init__(self, config):
         super().__init__()
@@ -77,7 +74,6 @@ class SWELightningModule(pl.LightningModule):
         self.grid = config["data"]["grid"]
         self.model_type = config["experiment"]["model_type"]
 
-        # Initialize the appropriate model
         if self.model_type == "sfno":
             self.model = self._create_sfno_model()
         elif self.model_type == "transformer":
@@ -87,16 +83,12 @@ class SWELightningModule(pl.LightningModule):
         else:
             raise ValueError(f"Unknown model type: {self.model_type}")
 
-        # Loss function
         self.loss_fn = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
-
-        # Metrics
         self.metric_l1 = L1LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l2 = L2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_w11 = W11LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
 
-        # Training state
-        self.nfuture = 0  # Number of autoregressive steps during training
+        self.nfuture = 0
 
     def _create_sfno_model(self):
         """Create SFNO model."""
@@ -162,7 +154,6 @@ class SWELightningModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         inp, tar = batch
 
-        # Autoregressive rollout during training
         prd = self.model(inp)
         for _ in range(self.nfuture):
             prd = self.model(prd)
@@ -175,14 +166,12 @@ class SWELightningModule(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         inp, tar = batch
 
-        # Autoregressive rollout during validation
         prd = self.model(inp)
         for _ in range(self.nfuture):
             prd = self.model(prd)
 
         loss = self.loss_fn(prd, tar)
 
-        # Calculate metrics
         l1 = self.metric_l1(prd, tar)
         l2 = self.metric_l2(prd, tar)
         w11 = self.metric_w11(prd, tar)
@@ -197,7 +186,6 @@ class SWELightningModule(pl.LightningModule):
     def configure_optimizers(self):
         lr = self.config["training"]["learning_rate"]
 
-        # Reduce learning rate for finetuning
         if self.nfuture > 0:
             lr = self.config["training"]["finetune_learning_rate"]
 
@@ -229,7 +217,6 @@ def create_datasets(config, device):
     nlon = config["data"]["nlon"]
     grid = config["data"]["grid"]
 
-    # Training dataset
     train_dataset = PdeDataset(
         dt=dt,
         nsteps=nsteps,
@@ -242,7 +229,6 @@ def create_datasets(config, device):
     train_dataset.set_initial_condition("random")
     train_dataset.set_num_examples(config["data"]["num_train_examples"])
 
-    # Validation dataset
     val_dataset = PdeDataset(
         dt=dt,
         nsteps=nsteps,
@@ -259,7 +245,6 @@ def create_datasets(config, device):
 
 
 def main():
-    # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config", type=str, default="config.yaml", help="Path to config file"
@@ -275,11 +260,9 @@ def main():
 
     mp.set_start_method("spawn", force=True)
 
-    # Load and update config
     config = load_config(known_args.config)
     config = update_config_from_args(config, unknown_args)
 
-    # Setup
     torch.set_float32_matmul_precision("high")
     pl.seed_everything(config["experiment"]["seed"], workers=True)
 
@@ -287,10 +270,8 @@ def main():
     print(f"Using device: {device}")
     print(f"Model type: {config['experiment']['model_type']}")
 
-    # Create datasets
     train_dataset, val_dataset = create_datasets(config, device)
 
-    # Create data loaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=config["data"]["batch_size"],
@@ -307,17 +288,14 @@ def main():
         persistent_workers=(config["data"]["num_workers"] > 0),
     )
 
-    # Initialize model
     model = SWELightningModule(config)
 
-    # Determine precision
     precision = 32
     if config["training"]["amp_mode"] == "fp16":
         precision = 16
     elif config["training"]["amp_mode"] == "bf16":
         precision = "bf16"
 
-    # ========== PHASE 1: PRETRAINING ==========
     if config["training"]["pretrain_epochs"] > 0 and known_args.resume_from is None:
         print("\n" + "=" * 70)
         print(
@@ -362,7 +340,6 @@ def main():
         checkpoint = torch.load(known_args.resume_from, map_location=device)
         state_dict = checkpoint["state_dict"]
 
-        # Remove problematic keys
         keys_to_ignore = ["metric_w11.k_phi_mesh", "metric_w11.k_theta_mesh"]
         for key in keys_to_ignore:
             if key in state_dict:
@@ -371,23 +348,19 @@ def main():
         model.load_state_dict(state_dict, strict=False)
         print("Checkpoint loaded successfully.\n")
 
-    # ========== PHASE 2: FINETUNING ==========
     if config["training"]["finetune_epochs"] > 0:
         print("\n" + "=" * 70)
         print(f"STARTING FINETUNING FOR {config['training']['finetune_epochs']} EPOCHS")
         print("=" * 70 + "\n")
 
-        # Update datasets for 2-step prediction
         dt = config["data"]["dt"]
         dt_solver = config["data"]["dt_solver"]
         new_nsteps = 2 * dt // dt_solver
         train_dataset.nsteps = new_nsteps
         val_dataset.nsteps = new_nsteps
 
-        # Update model for autoregressive training
         model.nfuture = 1
 
-        # Separate logger for finetuning
         finetune_logger = TensorBoardLogger(
             config["training"]["save_dir"],
             name=f"{config['experiment']['name']}_finetune",

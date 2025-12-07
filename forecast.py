@@ -32,7 +32,7 @@ def load_config(config_path):
 
 
 class SWELightningModule(pl.LightningModule):
-    """Unified Lightning Module for loading both SFNO and Transformer models."""
+    """Unified Lightning Module for loading SFNO, Transformer, and Paradis models."""
 
     def __init__(self, config):
         super().__init__()
@@ -44,7 +44,6 @@ class SWELightningModule(pl.LightningModule):
         self.grid = config["data"]["grid"]
         self.model_type = config["experiment"]["model_type"]
 
-        # Initialize the appropriate model
         if self.model_type == "sfno":
             self.model = self._create_sfno_model()
         elif self.model_type == "transformer":
@@ -54,7 +53,6 @@ class SWELightningModule(pl.LightningModule):
         else:
             raise ValueError(f"Unknown model type: {self.model_type}")
 
-        # Loss function and metrics
         self.loss_fn = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l1 = L1LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l2 = L2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
@@ -125,125 +123,136 @@ class SWELightningModule(pl.LightningModule):
 def compute_energy_spectra(fields, sht):
     """
     Compute energy spectra for shallow water equation fields.
-    
+
     Args:
         fields: Tensor of shape (batch, 3, nlat, nlon) containing [h, vorticity, divergence]
         sht: RealSHT object for spherical harmonic transforms
-    
+
     Returns:
         Dictionary containing power spectra for rotational, divergent, and potential energy
     """
-    # Extract fields
     h = fields[:, 0:1]
     vort = fields[:, 1:2]
     div = fields[:, 2:3]
-    
-    # Transform to spectral space
+
     h_spec = sht(h)
     vort_spec = sht(vort)
     div_spec = sht(div)
-    
-    # Compute power spectra
+
     h_power = torch.abs(h_spec) ** 2
     vort_power = torch.abs(vort_spec) ** 2
     div_power = torch.abs(div_spec) ** 2
-    
-    # Remove channel dimension if present
+
     if h_power.dim() == 4:
         h_power = h_power.squeeze(1)
         vort_power = vort_power.squeeze(1)
         div_power = div_power.squeeze(1)
-    
+
     batch_size = fields.shape[0]
     nlat = h_power.shape[1]
     nmodes = h_power.shape[2]
     max_k = min(nlat // 2, nmodes)
-    
-    # Initialize spectra
+
     rot_spectrum = torch.zeros(batch_size, max_k, device=fields.device)
     div_spectrum = torch.zeros(batch_size, max_k, device=fields.device)
     pot_spectrum = torch.zeros(batch_size, max_k, device=fields.device)
     counts = torch.zeros(max_k, device=fields.device)
-    
-    # Create wavenumber grid and bin into shells
+
     k_lat = torch.arange(nlat, device=fields.device, dtype=torch.float32)
     k_lon = torch.arange(nmodes, device=fields.device, dtype=torch.float32)
-    k_lat_grid, k_lon_grid = torch.meshgrid(k_lat, k_lon, indexing='ij')
+    k_lat_grid, k_lon_grid = torch.meshgrid(k_lat, k_lon, indexing="ij")
     k_total = torch.sqrt(k_lat_grid**2 + k_lon_grid**2)
     k_bins = torch.clamp(k_total.long(), 0, max_k - 1)
-    
-    # Accumulate power in each bin
+
     for k in range(max_k):
-        mask = (k_bins == k)
+        mask = k_bins == k
         if mask.any():
             counts[k] = mask.sum().float()
             for b in range(batch_size):
                 rot_spectrum[b, k] = (vort_power[b] * mask).sum()
                 div_spectrum[b, k] = (div_power[b] * mask).sum()
                 pot_spectrum[b, k] = (h_power[b] * mask).sum()
-    
-    # Normalize and account for symmetry
+
     counts = torch.maximum(counts, torch.ones_like(counts))
     rot_spectrum = rot_spectrum / counts.unsqueeze(0)
     div_spectrum = div_spectrum / counts.unsqueeze(0)
     pot_spectrum = pot_spectrum / counts.unsqueeze(0)
-    
+
     for k in range(1, max_k):
         rot_spectrum[:, k] *= 2.0
         div_spectrum[:, k] *= 2.0
         pot_spectrum[:, k] *= 2.0
-    
+
     total_spectrum = rot_spectrum + div_spectrum + pot_spectrum
-    
-    # Average over batch
+
     rot_spectrum = rot_spectrum.mean(dim=0)
     div_spectrum = div_spectrum.mean(dim=0)
     pot_spectrum = pot_spectrum.mean(dim=0)
     total_spectrum = total_spectrum.mean(dim=0)
-    
+
     return {
-        'rotational': rot_spectrum.cpu().numpy(),
-        'divergent': div_spectrum.cpu().numpy(),
-        'potential': pot_spectrum.cpu().numpy(),
-        'total': total_spectrum.cpu().numpy(),
-        'wavenumbers': np.arange(max_k)
+        "rotational": rot_spectrum.cpu().numpy(),
+        "divergent": div_spectrum.cpu().numpy(),
+        "potential": pot_spectrum.cpu().numpy(),
+        "total": total_spectrum.cpu().numpy(),
+        "wavenumbers": np.arange(max_k),
     }
 
 
-def plot_energy_spectra(pred_spectra, truth_spectra, step, output_path, model_name="Model"):
+def plot_energy_spectra(
+    pred_spectra, truth_spectra, step, output_path, model_name="Model"
+):
     """Plot energy spectra comparing prediction and truth."""
     fig = plt.figure(figsize=(14, 10))
     gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.3)
-    
-    k = pred_spectra['wavenumbers']
+
+    k = pred_spectra["wavenumbers"]
     k_plot = k[1:]
-    
+
     k_ref = np.array([5.0, 50.0])
     ref_minus3 = 1e4 * k_ref ** (-3.0)
-    ref_minus5_3 = 1e3 * k_ref ** (-5.0/3.0)
-    
-    titles = ['Rotational Kinetic Energy', 'Divergent Kinetic Energy', 
-              'Potential Energy', 'Total Energy']
-    keys = ['rotational', 'divergent', 'potential', 'total']
-    
+    ref_minus5_3 = 1e3 * k_ref ** (-5.0 / 3.0)
+
+    titles = [
+        "Rotational Kinetic Energy",
+        "Divergent Kinetic Energy",
+        "Potential Energy",
+        "Total Energy",
+    ]
+    keys = ["rotational", "divergent", "potential", "total"]
+
     for idx, (title, key) in enumerate(zip(titles, keys)):
         ax = fig.add_subplot(gs[idx // 2, idx % 2])
-        
-        ax.loglog(k_plot, pred_spectra[key][1:], 'b-', linewidth=2, 
-                 label=f'{model_name} Prediction', alpha=0.8)
-        ax.loglog(k_plot, truth_spectra[key][1:], 'r--', linewidth=2, 
-                 label='Ground Truth', alpha=0.8)
-        ax.loglog(k_ref, ref_minus3, 'k:', linewidth=1.5, alpha=0.5, label=r'$k^{-3}$')
-        ax.loglog(k_ref, ref_minus5_3, 'k-.', linewidth=1.5, alpha=0.5, label=r'$k^{-5/3}$')
-        
-        ax.set_xlabel('Wavenumber $l$', fontsize=11)
-        ax.set_ylabel('Power Spectrum', fontsize=11)
-        ax.set_title(f'{title} (t={step})', fontsize=12, fontweight='bold')
-        ax.grid(True, alpha=0.3, which='both')
-        ax.legend(loc='lower left', fontsize=9)
+
+        ax.loglog(
+            k_plot,
+            pred_spectra[key][1:],
+            "b-",
+            linewidth=2,
+            label=f"{model_name} Prediction",
+            alpha=0.8,
+        )
+        ax.loglog(
+            k_plot,
+            truth_spectra[key][1:],
+            "r--",
+            linewidth=2,
+            label="Ground Truth",
+            alpha=0.8,
+        )
+        ax.loglog(k_ref, ref_minus3, "k:", linewidth=1.5, alpha=0.5, label=r"$k^{-3}$")
+        ax.loglog(
+            k_ref, ref_minus5_3, "k-.", linewidth=1.5, alpha=0.5, label=r"$k^{-5/3}$"
+        )
+
+        ax.set_xlabel("Wavenumber $l$", fontsize=11)
+        ax.set_ylabel("Power Spectrum", fontsize=11)
+        ax.set_title(f"{title} (t={step})", fontsize=12, fontweight="bold")
+        ax.grid(True, alpha=0.3, which="both")
+        ax.legend(loc="lower left", fontsize=9)
         ax.set_xlim([1, k_plot[-1]])
-        
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
 
 
@@ -261,27 +270,10 @@ def autoregressive_inference(
     spectral_analysis=True,
     device=torch.device("cpu"),
 ):
-    """
-    Perform autoregressive inference.
-
-    Args:
-        model: The trained model
-        dataset: PdeDataset containing solver and normalization stats
-        loss_fn: Loss function
-        metrics_dict: Dictionary of metric functions
-        output_dir: Directory to save results
-        nsteps: Number of solver steps per model step
-        model_name: Name of the model to display in plots
-        autoreg_steps: Number of autoregressive steps
-        plot_channel: Which channel to plot (0=Geopotential)
-        save_plots: Whether to save plots
-        spectral_analysis: Whether to perform spectral analysis
-        device: Device to run on
-    """
+    """Perform autoregressive inference and generate forecast plots."""
     model.eval()
     model.to(device)
 
-    # Move dataset components to device
     dataset.solver = dataset.solver.to(device)
     dataset.sht = dataset.sht.to(device)
     dataset.inp_mean = dataset.inp_mean.to(device)
@@ -292,7 +284,6 @@ def autoregressive_inference(
         spectral_dir = output_dir
         os.makedirs(spectral_dir, exist_ok=True)
 
-    # Storage for metrics
     metrics_data = {key: [] for key in metrics_dict.keys()}
     metrics_data["loss"] = []
 
@@ -301,21 +292,16 @@ def autoregressive_inference(
     print(f"Starting Autoregressive Inference for {autoreg_steps} steps...")
 
     with torch.no_grad():
-        # Generate initial condition
         ic = dataset.solver.random_initial_condition(mach=0.2)
 
-        # Get normalization parameters
         inp_mean = dataset.inp_mean
         inp_var = dataset.inp_var
 
-        # Convert to grid and normalize for model input
         prd = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
-        prd = prd.unsqueeze(0)  # Add batch dimension
+        prd = prd.unsqueeze(0)
 
-        # Ground truth state (spectral)
         uspec = ic.clone()
 
-        # Plot and compute spectra for initial condition
         if save_plots:
             fig, ax = plt.subplots(1, 1, figsize=(6, 5))
             pred_data = prd[0, plot_channel].cpu().numpy()
@@ -335,18 +321,14 @@ def autoregressive_inference(
             plot_path = os.path.join(spectral_dir, f"spectra_{0:0{pad_width}d}.png")
             plot_energy_spectra(pred_spectra, truth_spectra, 0, plot_path, model_name)
 
-        # Autoregressive rollout
         for step in range(1, autoreg_steps + 1):
-            # Model prediction
             prd = model(prd)
 
-            # Ground truth update using solver
             uspec = dataset.solver.timestep(uspec, nsteps)
             ref_grid = dataset.solver.spec2grid(uspec)
             ref = (ref_grid - inp_mean) / torch.sqrt(inp_var)
             ref = ref.unsqueeze(0)
 
-            # Compute metrics
             step_metrics = {}
             for name, metric_fn in metrics_dict.items():
                 val = metric_fn(prd, ref).item()
@@ -357,30 +339,25 @@ def autoregressive_inference(
             metrics_data["loss"].append(loss_val)
             step_metrics["loss"] = loss_val
 
-            # Print metrics
             metrics_str = ", ".join([f"{k}: {v:.6f}" for k, v in step_metrics.items()])
             print(f"Step {step}: {metrics_str}")
 
-            # Plot comparison
             if save_plots:
                 fig = plt.figure(figsize=(12, 8))
                 gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], hspace=0.3)
 
-                # Prediction
                 ax0 = fig.add_subplot(gs[0, 0])
                 pred_data = prd[0, plot_channel].cpu().numpy()
                 im0 = ax0.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
                 ax0.set_title(f"{model_name} Prediction (t={step})")
                 ax0.axis("off")
 
-                # Truth
                 ax1 = fig.add_subplot(gs[0, 1])
                 truth_data = ref[0, plot_channel].cpu().numpy()
                 im1 = ax1.imshow(truth_data, vmin=-4, vmax=4, cmap="twilight_shifted")
                 ax1.set_title(f"Truth (t={step})")
                 ax1.axis("off")
 
-                # Error
                 ax2 = fig.add_subplot(gs[1, :])
                 error_data = pred_data - truth_data
                 im2 = ax2.imshow(error_data, vmin=-1, vmax=1, cmap="RdBu_r")
@@ -394,17 +371,21 @@ def autoregressive_inference(
                 fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal", label="Error")
 
                 fname = f"comparison_{step:0{pad_width}d}.png"
-                plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
+                plt.savefig(
+                    os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
+                )
                 plt.close()
 
-            # Spectral analysis
             if spectral_analysis:
                 pred_spectra = compute_energy_spectra(prd, dataset.sht)
                 truth_spectra = compute_energy_spectra(ref, dataset.sht)
-                plot_path = os.path.join(spectral_dir, f"spectra_{step:0{pad_width}d}.png")
-                plot_energy_spectra(pred_spectra, truth_spectra, step, plot_path, model_name)
+                plot_path = os.path.join(
+                    spectral_dir, f"spectra_{step:0{pad_width}d}.png"
+                )
+                plot_energy_spectra(
+                    pred_spectra, truth_spectra, step, plot_path, model_name
+                )
 
-    # Compute summary statistics
     summary = {}
     for key, values in metrics_data.items():
         if len(values) > 0:
@@ -447,24 +428,24 @@ def main():
     )
     parser.add_argument("--no_plots", action="store_true", help="Disable saving plots")
     parser.add_argument(
-        "--spectral_analysis", action="store_true", default=True, help="Perform spectral analysis"
+        "--spectral_analysis",
+        action="store_true",
+        default=True,
+        help="Perform spectral analysis",
     )
 
     args = parser.parse_args()
 
-    # Load config
     if not os.path.exists(args.config):
         raise FileNotFoundError(f"Config file not found: {args.config}")
 
     config = load_config(args.config)
 
-    # Determine device
     if args.device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         device = torch.device(args.device)
 
-    # Get model name for plots
     model_type = config["experiment"]["model_type"]
     if model_type == "sfno":
         model_name = "SFNO"
@@ -487,14 +468,12 @@ def main():
     print(f"Spectral analysis: {args.spectral_analysis}")
     print("=" * 70 + "\n")
 
-    # Load checkpoint
     print(f"Loading checkpoint: {args.checkpoint}")
     model_module = SWELightningModule(config)
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
     state_dict = checkpoint["state_dict"]
 
-    # Remove problematic keys
     keys_to_ignore = ["metric_w11.k_phi_mesh", "metric_w11.k_theta_mesh"]
     for key in keys_to_ignore:
         if key in state_dict:
@@ -505,7 +484,6 @@ def main():
     model_module.eval()
     print("Checkpoint loaded successfully.\n")
 
-    # Setup dataset and solver
     print("Setting up Shallow Water Solver...")
     dt = config["data"]["dt"]
     dt_solver = config["data"]["dt_solver"]
@@ -525,14 +503,12 @@ def main():
         grid=config["data"]["grid"],
     ).to(device)
 
-    # Prepare metrics dictionary
     metrics_dict = {
         "L1_error": model_module.metric_l1,
         "L2_error": model_module.metric_l2,
         "W11_error": model_module.metric_w11,
     }
 
-    # Run inference
     results = autoregressive_inference(
         model=model_module,
         dataset=dataset,
@@ -548,7 +524,6 @@ def main():
         device=device,
     )
 
-    # Print and save results
     print("\n" + "=" * 70)
     print("SUMMARY STATISTICS")
     print("=" * 70)
@@ -559,7 +534,6 @@ def main():
         if mean_key in results:
             print(f"{key:12s}: {results[mean_key]:.6f} ± {results[std_key]:.6f}")
 
-    # Save metrics to CSV
     df = pd.DataFrame([results])
     metrics_path = os.path.join(args.output_dir, "metrics.csv")
     df.to_csv(metrics_path, index=False)
@@ -569,7 +543,9 @@ def main():
     if not args.no_plots:
         print(f"Plots saved to: {args.output_dir}")
     if args.spectral_analysis:
-        print(f"Spectral analysis saved to: {os.path.join(args.output_dir, 'spectral')}")
+        print(
+            f"Spectral analysis saved to: {os.path.join(args.output_dir, 'spectral')}"
+        )
     print("=" * 70)
 
 
