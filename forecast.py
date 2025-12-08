@@ -302,6 +302,14 @@ def autoregressive_inference(
 
         uspec = ic.clone()
 
+        prd_uv_grid = dataset.solver.getuv(ic[1:])
+
+        outputs = {"fields": prd[0].cpu(), "winds": prd_uv_grid.cpu()}
+        torch.save(
+            outputs, os.path.join(output_dir, f"prediction_{0:0{pad_width}d}.pt")
+        )
+        torch.save(outputs, os.path.join(output_dir, f"truth_{0:0{pad_width}d}.pt"))
+
         if save_plots:
             fig, ax = plt.subplots(1, 1, figsize=(6, 5))
             pred_data = prd[0, plot_channel].cpu().numpy()
@@ -315,6 +323,20 @@ def autoregressive_inference(
             plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
             plt.close()
 
+            wind_mag = (
+                torch.sqrt(prd_uv_grid[0] ** 2 + prd_uv_grid[1] ** 2).cpu().numpy()
+            )
+            fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+            im = ax.imshow(wind_mag, cmap="viridis")
+            ax.set_title("Initial Wind Magnitude (t=0)")
+            ax.axis("off")
+            fig.subplots_adjust(bottom=0.15)
+            cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
+            fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
+            fname = f"wind_{0:0{pad_width}d}.png"
+            plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
+            plt.close()
+
         if spectral_analysis:
             pred_spectra = compute_energy_spectra(prd, dataset.sht)
             truth_spectra = compute_energy_spectra(prd, dataset.sht)
@@ -324,10 +346,28 @@ def autoregressive_inference(
         for step in range(1, autoreg_steps + 1):
             prd = model(prd)
 
+            prd_unnorm = prd * torch.sqrt(inp_var) + inp_mean
+            prd_spec = dataset.sht(prd_unnorm.squeeze(0))
+            prd_uv_grid = dataset.solver.getuv(prd_spec[1:])
+
             uspec = dataset.solver.timestep(uspec, nsteps)
             ref_grid = dataset.solver.spec2grid(uspec)
+
+            ref_uv_grid = dataset.solver.getuv(uspec[1:])
+
             ref = (ref_grid - inp_mean) / torch.sqrt(inp_var)
             ref = ref.unsqueeze(0)
+
+            pred_outputs = {"fields": prd[0].cpu(), "winds": prd_uv_grid.cpu()}
+            truth_outputs = {"fields": ref[0].cpu(), "winds": ref_uv_grid.cpu()}
+            torch.save(
+                pred_outputs,
+                os.path.join(output_dir, f"prediction_{step:0{pad_width}d}.pt"),
+            )
+            torch.save(
+                truth_outputs,
+                os.path.join(output_dir, f"truth_{step:0{pad_width}d}.pt"),
+            )
 
             step_metrics = {}
             for name, metric_fn in metrics_dict.items():
@@ -371,6 +411,47 @@ def autoregressive_inference(
                 fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal", label="Error")
 
                 fname = f"comparison_{step:0{pad_width}d}.png"
+                plt.savefig(
+                    os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
+                )
+                plt.close()
+
+                pred_wind_mag = (
+                    torch.sqrt(prd_uv_grid[0] ** 2 + prd_uv_grid[1] ** 2).cpu().numpy()
+                )
+                truth_wind_mag = (
+                    torch.sqrt(ref_uv_grid[0] ** 2 + ref_uv_grid[1] ** 2).cpu().numpy()
+                )
+                wind_error = pred_wind_mag - truth_wind_mag
+
+                fig = plt.figure(figsize=(12, 8))
+                gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], hspace=0.3)
+
+                ax0 = fig.add_subplot(gs[0, 0])
+                im0 = ax0.imshow(pred_wind_mag, cmap="viridis")
+                ax0.set_title(f"{model_name} Wind Magnitude (t={step})")
+                ax0.axis("off")
+
+                ax1 = fig.add_subplot(gs[0, 1])
+                im1 = ax1.imshow(truth_wind_mag, cmap="viridis")
+                ax1.set_title(f"Truth Wind Magnitude (t={step})")
+                ax1.axis("off")
+
+                ax2 = fig.add_subplot(gs[1, :])
+                vmax_err = max(abs(wind_error.min()), abs(wind_error.max()))
+                im2 = ax2.imshow(
+                    wind_error, vmin=-vmax_err, vmax=vmax_err, cmap="RdBu_r"
+                )
+                ax2.set_title(f"Wind Magnitude Error (t={step})")
+                ax2.axis("off")
+
+                cbar_ax1 = fig.add_axes([0.15, 0.52, 0.7, 0.02])
+                fig.colorbar(im0, cax=cbar_ax1, orientation="horizontal")
+
+                cbar_ax2 = fig.add_axes([0.15, 0.05, 0.7, 0.02])
+                fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal", label="Error")
+
+                fname = f"wind_{step:0{pad_width}d}.png"
                 plt.savefig(
                     os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
                 )
@@ -497,11 +578,7 @@ def main():
         normalize=True,
         device=device,
     )
-    dataset.sht = RealSHT(
-        nlat=config["data"]["nlat"],
-        nlon=config["data"]["nlon"],
-        grid=config["data"]["grid"],
-    ).to(device)
+    dataset.sht = dataset.solver.sht
 
     metrics_dict = {
         "L1_error": model_module.metric_l1,
