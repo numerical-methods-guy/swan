@@ -22,6 +22,7 @@ from torch_harmonics.examples.models.sfno import SphericalFourierNeuralOperator
 from torch_harmonics.examples.models.s2transformer import SphericalTransformer
 
 from paradis import ParadisModel
+from pde_dataset_with_winds import PdeDatasetWithWinds
 
 
 def load_config(config_path):
@@ -43,6 +44,9 @@ class SWELightningModule(pl.LightningModule):
         self.nlon = config["data"]["nlon"]
         self.grid = config["data"]["grid"]
         self.model_type = config["experiment"]["model_type"]
+
+        # PARADIS always uses winds
+        self.use_winds = self.model_type == "paradis"
 
         if self.model_type == "sfno":
             self.model = self._create_sfno_model()
@@ -116,8 +120,11 @@ class SWELightningModule(pl.LightningModule):
 
         return ParadisModel(self.config)
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, *args):
+        if self.use_winds:
+            return self.model(args[0], args[1])
+        else:
+            return self.model(args[0])
 
 
 def compute_energy_spectra(fields, sht):
@@ -256,7 +263,7 @@ def plot_energy_spectra(
     plt.close()
 
 
-def autoregressive_inference(
+def autoregressive_inference_with_winds(
     model,
     dataset,
     loss_fn,
@@ -271,6 +278,165 @@ def autoregressive_inference(
     device=torch.device("cpu"),
 ):
     """Perform autoregressive inference and generate forecast plots."""
+    model.eval()
+    model.to(device)
+
+    dataset.solver = dataset.solver.to(device)
+    dataset.sht = dataset.sht.to(device)
+    dataset.inp_mean = dataset.inp_mean.to(device)
+    dataset.inp_var = dataset.inp_var.to(device)
+    dataset.wind_mean = dataset.wind_mean.to(device)
+    dataset.wind_var = dataset.wind_var.to(device)
+
+    os.makedirs(output_dir, exist_ok=True)
+    if spectral_analysis:
+        spectral_dir = output_dir
+        os.makedirs(spectral_dir, exist_ok=True)
+
+    metrics_data = {key: [] for key in metrics_dict.keys()}
+    metrics_data["loss"] = []
+
+    pad_width = len(str(autoreg_steps))
+
+    print(f"Starting Autoregressive Inference for {autoreg_steps} steps...")
+
+    with torch.no_grad():
+        ic = dataset.solver.random_initial_condition(mach=0.2)
+
+        inp_mean = dataset.inp_mean
+        inp_var = dataset.inp_var
+        wind_mean = dataset.wind_mean
+        wind_var = dataset.wind_var
+
+        prd_fields = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
+        prd_fields = prd_fields.unsqueeze(0)
+
+        prd_winds = dataset.solver.getuv(ic[1:])
+        prd_winds = (prd_winds - wind_mean) / torch.sqrt(wind_var)
+        prd_winds = prd_winds.unsqueeze(0)
+
+        uspec = ic.clone()
+
+        prd_uv_grid = dataset.solver.getuv(ic[1:])
+        outputs = {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid.cpu()}
+        torch.save(
+            outputs, os.path.join(output_dir, f"prediction_{0:0{pad_width}d}.pt")
+        )
+        torch.save(outputs, os.path.join(output_dir, f"truth_{0:0{pad_width}d}.pt"))
+
+        if save_plots:
+            fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+            pred_data = prd_fields[0, plot_channel].cpu().numpy()
+            im = ax.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
+            ax.set_title("Initial Condition (t=0)")
+            ax.axis("off")
+            fig.subplots_adjust(bottom=0.15)
+            cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
+            fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
+            fname = f"comparison_{0:0{pad_width}d}.png"
+            plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
+            plt.close()
+
+        if spectral_analysis:
+            pred_spectra = compute_energy_spectra(prd_fields, dataset.sht)
+            truth_spectra = compute_energy_spectra(prd_fields, dataset.sht)
+            plot_path = os.path.join(spectral_dir, f"spectra_{0:0{pad_width}d}.png")
+            plot_energy_spectra(pred_spectra, truth_spectra, 0, plot_path, model_name)
+
+        for step in range(1, autoreg_steps + 1):
+            prd_fields = model(prd_fields, prd_winds)
+
+            prd_unnorm = prd_fields * torch.sqrt(inp_var) + inp_mean
+            prd_spec = dataset.sht(prd_unnorm.squeeze(0))
+
+            prd_uv_grid = dataset.solver.getuv(prd_spec[1:])
+
+            prd_winds = (prd_uv_grid - wind_mean) / torch.sqrt(wind_var)
+            prd_winds = prd_winds.unsqueeze(0)
+
+            uspec = dataset.solver.timestep(uspec, nsteps)
+            ref_grid = dataset.solver.spec2grid(uspec)
+            ref_uv_grid = dataset.solver.getuv(uspec[1:])
+
+            ref_fields = (ref_grid - inp_mean) / torch.sqrt(inp_var)
+            ref_fields = ref_fields.unsqueeze(0)
+
+            pred_outputs = {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid.cpu()}
+            truth_outputs = {"fields": ref_fields[0].cpu(), "winds": ref_uv_grid.cpu()}
+            torch.save(
+                pred_outputs,
+                os.path.join(output_dir, f"prediction_{step:0{pad_width}d}.pt"),
+            )
+            torch.save(
+                truth_outputs,
+                os.path.join(output_dir, f"truth_{step:0{pad_width}d}.pt"),
+            )
+
+            step_metrics = {}
+            for name, metric_fn in metrics_dict.items():
+                val = metric_fn(prd_fields, ref_fields).item()
+                metrics_data[name].append(val)
+                step_metrics[name] = val
+
+            loss_val = loss_fn(prd_fields, ref_fields).item()
+            metrics_data["loss"].append(loss_val)
+            step_metrics["loss"] = loss_val
+
+            metrics_str = ", ".join([f"{k}: {v:.6f}" for k, v in step_metrics.items()])
+            print(f"Step {step}: {metrics_str}")
+
+            if save_plots:
+                fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+                pred_data = prd_fields[0, plot_channel].cpu().numpy()
+                im = ax.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
+                ax.set_title(f"Prediction (t={step})")
+                ax.axis("off")
+                fig.subplots_adjust(bottom=0.15)
+                cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
+                fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
+                fname = f"comparison_{step:0{pad_width}d}.png"
+                plt.savefig(
+                    os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
+                )
+                plt.close()
+
+            if spectral_analysis:
+                pred_spectra = compute_energy_spectra(prd_fields, dataset.sht)
+                truth_spectra = compute_energy_spectra(ref_fields, dataset.sht)
+                plot_path = os.path.join(
+                    spectral_dir, f"spectra_{step:0{pad_width}d}.png"
+                )
+                plot_energy_spectra(
+                    pred_spectra, truth_spectra, step, plot_path, model_name
+                )
+
+    summary = {}
+    for key, values in metrics_data.items():
+        if len(values) > 0:
+            summary[f"{key}_mean"] = np.mean(values)
+            summary[f"{key}_std"] = np.std(values)
+        else:
+            summary[f"{key}_mean"] = float("nan")
+            summary[f"{key}_std"] = float("nan")
+
+    return summary
+
+
+def autoregressive_inference(
+    model,
+    dataset,
+    loss_fn,
+    metrics_dict,
+    output_dir,
+    nsteps,
+    model_name="Model",
+    autoreg_steps=10,
+    plot_channel=0,
+    save_plots=True,
+    spectral_analysis=True,
+    device=torch.device("cpu"),
+):
+    """Perform autoregressive inference for standard models (SFNO, Transformer)."""
     model.eval()
     model.to(device)
 
@@ -320,20 +486,6 @@ def autoregressive_inference(
             cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
             fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
             fname = f"comparison_{0:0{pad_width}d}.png"
-            plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
-            plt.close()
-
-            wind_mag = (
-                torch.sqrt(prd_uv_grid[0] ** 2 + prd_uv_grid[1] ** 2).cpu().numpy()
-            )
-            fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-            im = ax.imshow(wind_mag, cmap="viridis")
-            ax.set_title("Initial Wind Magnitude (t=0)")
-            ax.axis("off")
-            fig.subplots_adjust(bottom=0.15)
-            cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
-            fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
-            fname = f"wind_{0:0{pad_width}d}.png"
             plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
             plt.close()
 
@@ -411,47 +563,6 @@ def autoregressive_inference(
                 fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal", label="Error")
 
                 fname = f"comparison_{step:0{pad_width}d}.png"
-                plt.savefig(
-                    os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
-                )
-                plt.close()
-
-                pred_wind_mag = (
-                    torch.sqrt(prd_uv_grid[0] ** 2 + prd_uv_grid[1] ** 2).cpu().numpy()
-                )
-                truth_wind_mag = (
-                    torch.sqrt(ref_uv_grid[0] ** 2 + ref_uv_grid[1] ** 2).cpu().numpy()
-                )
-                wind_error = pred_wind_mag - truth_wind_mag
-
-                fig = plt.figure(figsize=(12, 8))
-                gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], hspace=0.3)
-
-                ax0 = fig.add_subplot(gs[0, 0])
-                im0 = ax0.imshow(pred_wind_mag, cmap="viridis")
-                ax0.set_title(f"{model_name} Wind Magnitude (t={step})")
-                ax0.axis("off")
-
-                ax1 = fig.add_subplot(gs[0, 1])
-                im1 = ax1.imshow(truth_wind_mag, cmap="viridis")
-                ax1.set_title(f"Truth Wind Magnitude (t={step})")
-                ax1.axis("off")
-
-                ax2 = fig.add_subplot(gs[1, :])
-                vmax_err = max(abs(wind_error.min()), abs(wind_error.max()))
-                im2 = ax2.imshow(
-                    wind_error, vmin=-vmax_err, vmax=vmax_err, cmap="RdBu_r"
-                )
-                ax2.set_title(f"Wind Magnitude Error (t={step})")
-                ax2.axis("off")
-
-                cbar_ax1 = fig.add_axes([0.15, 0.52, 0.7, 0.02])
-                fig.colorbar(im0, cax=cbar_ax1, orientation="horizontal")
-
-                cbar_ax2 = fig.add_axes([0.15, 0.05, 0.7, 0.02])
-                fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal", label="Error")
-
-                fname = f"wind_{step:0{pad_width}d}.png"
                 plt.savefig(
                     os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
                 )
@@ -570,14 +681,27 @@ def main():
     dt_solver = config["data"]["dt_solver"]
     nsteps = dt // dt_solver
 
-    dataset = PdeDataset(
-        dt=dt,
-        nsteps=nsteps,
-        dims=(config["data"]["nlat"], config["data"]["nlon"]),
-        grid=config["data"]["grid"],
-        normalize=True,
-        device=device,
-    )
+    use_winds = model_type == "paradis"
+
+    if use_winds:
+        dataset = PdeDatasetWithWinds(
+            dt=dt,
+            nsteps=nsteps,
+            dims=(config["data"]["nlat"], config["data"]["nlon"]),
+            grid=config["data"]["grid"],
+            normalize=True,
+            device=device,
+        )
+    else:
+        dataset = PdeDataset(
+            dt=dt,
+            nsteps=nsteps,
+            dims=(config["data"]["nlat"], config["data"]["nlon"]),
+            grid=config["data"]["grid"],
+            normalize=True,
+            device=device,
+        )
+
     dataset.sht = dataset.solver.sht
 
     metrics_dict = {
@@ -586,20 +710,36 @@ def main():
         "W11_error": model_module.metric_w11,
     }
 
-    results = autoregressive_inference(
-        model=model_module,
-        dataset=dataset,
-        loss_fn=model_module.loss_fn,
-        metrics_dict=metrics_dict,
-        output_dir=args.output_dir,
-        nsteps=nsteps,
-        model_name=model_name,
-        autoreg_steps=args.autoreg_steps,
-        plot_channel=args.plot_channel,
-        save_plots=(not args.no_plots),
-        spectral_analysis=args.spectral_analysis,
-        device=device,
-    )
+    if use_winds:
+        results = autoregressive_inference_with_winds(
+            model=model_module,
+            dataset=dataset,
+            loss_fn=model_module.loss_fn,
+            metrics_dict=metrics_dict,
+            output_dir=args.output_dir,
+            nsteps=nsteps,
+            model_name=model_name,
+            autoreg_steps=args.autoreg_steps,
+            plot_channel=args.plot_channel,
+            save_plots=(not args.no_plots),
+            spectral_analysis=args.spectral_analysis,
+            device=device,
+        )
+    else:
+        results = autoregressive_inference(
+            model=model_module,
+            dataset=dataset,
+            loss_fn=model_module.loss_fn,
+            metrics_dict=metrics_dict,
+            output_dir=args.output_dir,
+            nsteps=nsteps,
+            model_name=model_name,
+            autoreg_steps=args.autoreg_steps,
+            plot_channel=args.plot_channel,
+            save_plots=(not args.no_plots),
+            spectral_analysis=args.spectral_analysis,
+            device=device,
+        )
 
     print("\n" + "=" * 70)
     print("SUMMARY STATISTICS")

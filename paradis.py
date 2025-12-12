@@ -16,6 +16,9 @@ class GeoCyclicPadding(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply cyclic padding to the input tensor."""
+        if self.pad_width == 0:
+            return x
+
         assert (
             len(x.shape) == 4
         ), "Input must be 4-dimensional [batch, channels, lat, lon]"
@@ -40,7 +43,7 @@ class GeoCyclicPadding(torch.nn.Module):
 
 
 class CLinear(nn.Module):
-    """Channel-wise linear layer (1x1 convolution)."""
+    """Channel-wise linear transformation."""
 
     def __init__(
         self,
@@ -51,39 +54,36 @@ class CLinear(nn.Module):
         bias: bool = True,
     ):
         super().__init__()
-        self.layer = nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=bias)
+        self.conv = nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.layer(x)
+        return self.conv(x)
 
 
 class SepConv(nn.Module):
-    """Separated convolution: 2D conv followed by channel-wise linear."""
+    """Separable convolution."""
 
     def __init__(
         self,
         input_dim: int,
         output_dim: int,
         mesh_size: tuple,
-        kernel_size: int,
+        kernel_size: int = 3,
         bias: bool = True,
     ):
         super().__init__()
-        self.kernel_size = kernel_size
+        self.padding = (kernel_size - 1) // 2
+        self.geo_padding = GeoCyclicPadding(self.padding)
 
-        if kernel_size > 1:
-            self.padding = GeoCyclicPadding(kernel_size // 2)
-
-        self.conv = nn.Conv2d(
-            input_dim, input_dim, kernel_size, groups=input_dim, bias=bias
+        self.depthwise = nn.Conv2d(
+            input_dim, input_dim, kernel_size, groups=input_dim, bias=False
         )
-        self.linear = nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=bias)
+        self.pointwise = nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.kernel_size > 1:
-            x = self.padding(x)
-        x = self.conv(x)
-        x = self.linear(x)
+        x = self.geo_padding(x)
+        x = self.depthwise(x)
+        x = self.pointwise(x)
         return x
 
 
@@ -236,7 +236,7 @@ class GMBlock(nn.Sequential):
 
 
 class NeuralSemiLagrangian(nn.Module):
-    """Implements the semi-Lagrangian advection for shallow water equations."""
+    """Neural semi-Lagrangian advection operator."""
 
     def __init__(
         self,
@@ -430,6 +430,10 @@ class ParadisModel(nn.Module):
         adv_interpolation = model_config["interpolation"]
         bias_channels = model_config.get("bias_channels", 4)
 
+        self.field_channels = 3  # h, vorticity, divergence
+        self.wind_channels = 2  # u, v
+        self.total_input_channels = 5  # fields + winds
+
         dlat = 180.0 / (self.nlat - 1)
         dlon = 360.0 / self.nlon
 
@@ -442,7 +446,7 @@ class ParadisModel(nn.Module):
 
         self.input_proj = GMBlock(
             layers=["SepConv"] * 2,
-            input_dim=3,
+            input_dim=self.total_input_channels,
             output_dim=hidden_dim,
             hidden_dim=hidden_dim,
             mesh_size=mesh_size,
@@ -511,22 +515,36 @@ class ParadisModel(nn.Module):
             bias_channels=bias_channels,
         )
 
-    def _DR(self, z: torch.Tensor, i: int) -> torch.Tensor:
-        return self.diffusion[i](z) + self.reaction[i](z)
+    def forward(self, fields: torch.Tensor, winds: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass with fields and winds.
 
-    def _step(self, z: torch.Tensor, i: int) -> torch.Tensor:
-        """Lie-Trotter splitting with RK2 on diffusion and reaction layers."""
-        zadv = self.advection[i](z, self.dt)
-        k1 = self._DR(zadv, i)
-        zmid = zadv + 0.5 * self.dt * k1
-        k2 = self._DR(zmid, i)
-        return zadv + self.dt * k2
+        Parameters
+        ----------
+        fields : torch.Tensor
+            Input fields of shape (batch, 3, nlat, nlon)
+        winds : torch.Tensor
+            Input winds of shape (batch, 2, nlat, nlon)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        z = self.input_proj(x)
-        z0 = z.clone()
+        Returns
+        -------
+        torch.Tensor
+            Output fields of shape (batch, 3, nlat, nlon)
+        """
+        x = torch.cat([fields, winds], dim=1)
+
+        hidden = self.input_proj(x)
 
         for i in range(self.num_layers):
-            z = self._step(z, i)
+            advected = self.advection[i](hidden, self.dt)
+            hidden = hidden + advected
 
-        return x + self.output_proj(z - z0)
+            diffused = self.diffusion[i](hidden)
+            hidden = hidden + diffused
+
+            reacted = self.reaction[i](hidden)
+            hidden = hidden + reacted
+
+        output = self.output_proj(hidden)
+
+        return output

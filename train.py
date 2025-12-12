@@ -23,6 +23,7 @@ from torch_harmonics.examples.models.sfno import SphericalFourierNeuralOperator
 from torch_harmonics.examples.models.s2transformer import SphericalTransformer
 
 from paradis import ParadisModel
+from pde_dataset_with_winds import PdeDatasetWithWinds
 
 
 def load_config(config_path):
@@ -73,6 +74,9 @@ class SWELightningModule(pl.LightningModule):
         self.nlon = config["data"]["nlon"]
         self.grid = config["data"]["grid"]
         self.model_type = config["experiment"]["model_type"]
+        
+        # PARADIS always uses winds
+        self.use_winds = (self.model_type == "paradis")
 
         if self.model_type == "sfno":
             self.model = self._create_sfno_model()
@@ -148,33 +152,52 @@ class SWELightningModule(pl.LightningModule):
 
         return ParadisModel(self.config)
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, *args):
+        if self.use_winds:
+            return self.model(args[0], args[1])
+        else:
+            return self.model(args[0])
 
     def training_step(self, batch, batch_idx):
-        inp, tar = batch
-
-        prd = self.model(inp)
-        for _ in range(self.nfuture):
-            prd = self.model(prd)
-
-        loss = self.loss_fn(prd, tar)
+        if self.use_winds:
+            inp_fields, inp_winds, tar_fields, tar_winds = batch
+            prd = self.model(inp_fields, inp_winds)
+            
+            for _ in range(self.nfuture):
+                prd = self.model(prd, inp_winds)
+            
+            loss = self.loss_fn(prd, tar_fields)
+        else:
+            inp, tar = batch
+            prd = self.model(inp)
+            for _ in range(self.nfuture):
+                prd = self.model(prd)
+            loss = self.loss_fn(prd, tar)
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        inp, tar = batch
-
-        prd = self.model(inp)
-        for _ in range(self.nfuture):
-            prd = self.model(prd)
-
-        loss = self.loss_fn(prd, tar)
-
-        l1 = self.metric_l1(prd, tar)
-        l2 = self.metric_l2(prd, tar)
-        w11 = self.metric_w11(prd, tar)
+        if self.use_winds:
+            inp_fields, inp_winds, tar_fields, tar_winds = batch
+            prd = self.model(inp_fields, inp_winds)
+            
+            for _ in range(self.nfuture):
+                prd = self.model(prd, inp_winds)
+            
+            loss = self.loss_fn(prd, tar_fields)
+            l1 = self.metric_l1(prd, tar_fields)
+            l2 = self.metric_l2(prd, tar_fields)
+            w11 = self.metric_w11(prd, tar_fields)
+        else:
+            inp, tar = batch
+            prd = self.model(inp)
+            for _ in range(self.nfuture):
+                prd = self.model(prd)
+            loss = self.loss_fn(prd, tar)
+            l1 = self.metric_l1(prd, tar)
+            l2 = self.metric_l2(prd, tar)
+            w11 = self.metric_w11(prd, tar)
 
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         self.log("val_l1", l1, sync_dist=True)
@@ -216,30 +239,59 @@ def create_datasets(config, device):
     nlat = config["data"]["nlat"]
     nlon = config["data"]["nlon"]
     grid = config["data"]["grid"]
+    
+    # PARADIS always uses winds
+    model_type = config["experiment"]["model_type"]
+    use_winds = (model_type == "paradis")
+    
+    if use_winds:
+        train_dataset = PdeDatasetWithWinds(
+            dt=dt,
+            nsteps=nsteps,
+            dims=(nlat, nlon),
+            grid=grid,
+            normalize=True,
+            device=device,
+        )
+        train_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
+        train_dataset.set_initial_condition("random")
+        train_dataset.set_num_examples(config["data"]["num_train_examples"])
 
-    train_dataset = PdeDataset(
-        dt=dt,
-        nsteps=nsteps,
-        dims=(nlat, nlon),
-        grid=grid,
-        normalize=True,
-        device=device,
-    )
-    train_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
-    train_dataset.set_initial_condition("random")
-    train_dataset.set_num_examples(config["data"]["num_train_examples"])
+        val_dataset = PdeDatasetWithWinds(
+            dt=dt,
+            nsteps=nsteps,
+            dims=(nlat, nlon),
+            grid=grid,
+            normalize=True,
+            device=device,
+        )
+        val_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
+        val_dataset.set_initial_condition("random")
+        val_dataset.set_num_examples(config["data"]["num_val_examples"])
+    else:
+        train_dataset = PdeDataset(
+            dt=dt,
+            nsteps=nsteps,
+            dims=(nlat, nlon),
+            grid=grid,
+            normalize=True,
+            device=device,
+        )
+        train_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
+        train_dataset.set_initial_condition("random")
+        train_dataset.set_num_examples(config["data"]["num_train_examples"])
 
-    val_dataset = PdeDataset(
-        dt=dt,
-        nsteps=nsteps,
-        dims=(nlat, nlon),
-        grid=grid,
-        normalize=True,
-        device=device,
-    )
-    val_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
-    val_dataset.set_initial_condition("random")
-    val_dataset.set_num_examples(config["data"]["num_val_examples"])
+        val_dataset = PdeDataset(
+            dt=dt,
+            nsteps=nsteps,
+            dims=(nlat, nlon),
+            grid=grid,
+            normalize=True,
+            device=device,
+        )
+        val_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
+        val_dataset.set_initial_condition("random")
+        val_dataset.set_num_examples(config["data"]["num_val_examples"])
 
     return train_dataset, val_dataset
 
