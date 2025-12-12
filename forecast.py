@@ -325,10 +325,11 @@ def autoregressive_inference_with_winds(
         torch.save(outputs, os.path.join(output_dir, f"truth_{0:0{pad_width}d}.pt"))
 
         if save_plots:
-            fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+            fig = plt.figure(figsize=(6, 5))
             pred_data = prd_fields[0, plot_channel].cpu().numpy()
+            ax = fig.add_subplot(1, 1, 1)
             im = ax.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-            ax.set_title("Initial Condition (t=0)")
+            ax.set_title("Initial Condition (t=0)", fontsize=12, fontweight="bold")
             ax.axis("off")
             fig.subplots_adjust(bottom=0.15)
             cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
@@ -386,14 +387,40 @@ def autoregressive_inference_with_winds(
             print(f"Step {step}: {metrics_str}")
 
             if save_plots:
-                fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+                fig = plt.figure(figsize=(18, 5))
+                
                 pred_data = prd_fields[0, plot_channel].cpu().numpy()
-                im = ax.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-                ax.set_title(f"Prediction (t={step})")
-                ax.axis("off")
-                fig.subplots_adjust(bottom=0.15)
-                cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
-                fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
+                truth_data = ref_fields[0, plot_channel].cpu().numpy()
+                error_data = pred_data - truth_data
+                
+                # Prediction
+                ax1 = fig.add_subplot(1, 3, 1)
+                im1 = ax1.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
+                ax1.set_title(f"Prediction (t={step})", fontsize=12, fontweight="bold")
+                ax1.axis("off")
+                
+                # Ground Truth
+                ax2 = fig.add_subplot(1, 3, 2)
+                im2 = ax2.imshow(truth_data, vmin=-4, vmax=4, cmap="twilight_shifted")
+                ax2.set_title(f"Ground Truth (t={step})", fontsize=12, fontweight="bold")
+                ax2.axis("off")
+                
+                # Error
+                ax3 = fig.add_subplot(1, 3, 3)
+                error_max = max(abs(error_data.min()), abs(error_data.max()))
+                im3 = ax3.imshow(error_data, vmin=-error_max, vmax=error_max, cmap="RdBu_r")
+                ax3.set_title(f"Error (t={step})", fontsize=12, fontweight="bold")
+                ax3.axis("off")
+                
+                # Add colorbars
+                fig.subplots_adjust(bottom=0.15, wspace=0.3)
+                cbar_ax1 = fig.add_axes([0.08, 0.08, 0.22, 0.03])
+                fig.colorbar(im1, cax=cbar_ax1, orientation="horizontal")
+                cbar_ax2 = fig.add_axes([0.39, 0.08, 0.22, 0.03])
+                fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal")
+                cbar_ax3 = fig.add_axes([0.70, 0.08, 0.22, 0.03])
+                fig.colorbar(im3, cax=cbar_ax3, orientation="horizontal")
+                
                 fname = f"comparison_{step:0{pad_width}d}.png"
                 plt.savefig(
                     os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
@@ -477,10 +504,11 @@ def autoregressive_inference(
         torch.save(outputs, os.path.join(output_dir, f"truth_{0:0{pad_width}d}.pt"))
 
         if save_plots:
-            fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+            fig = plt.figure(figsize=(6, 5))
             pred_data = prd[0, plot_channel].cpu().numpy()
+            ax = fig.add_subplot(1, 1, 1)
             im = ax.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-            ax.set_title("Initial Condition (t=0)")
+            ax.set_title("Initial Condition (t=0)", fontsize=12, fontweight="bold")
             ax.axis("off")
             fig.subplots_adjust(bottom=0.15)
             cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
@@ -535,33 +563,40 @@ def autoregressive_inference(
             print(f"Step {step}: {metrics_str}")
 
             if save_plots:
-                fig = plt.figure(figsize=(12, 8))
-                gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], hspace=0.3)
-
-                ax0 = fig.add_subplot(gs[0, 0])
+                fig = plt.figure(figsize=(18, 5))
+                
                 pred_data = prd[0, plot_channel].cpu().numpy()
-                im0 = ax0.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-                ax0.set_title(f"{model_name} Prediction (t={step})")
-                ax0.axis("off")
-
-                ax1 = fig.add_subplot(gs[0, 1])
                 truth_data = ref[0, plot_channel].cpu().numpy()
-                im1 = ax1.imshow(truth_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-                ax1.set_title(f"Truth (t={step})")
-                ax1.axis("off")
-
-                ax2 = fig.add_subplot(gs[1, :])
                 error_data = pred_data - truth_data
-                im2 = ax2.imshow(error_data, vmin=-1, vmax=1, cmap="RdBu_r")
-                ax2.set_title(f"Error (Prediction - Truth) (t={step})")
+                
+                # Prediction
+                ax1 = fig.add_subplot(1, 3, 1)
+                im1 = ax1.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
+                ax1.set_title(f"Prediction (t={step})", fontsize=12, fontweight="bold")
+                ax1.axis("off")
+                
+                # Ground Truth
+                ax2 = fig.add_subplot(1, 3, 2)
+                im2 = ax2.imshow(truth_data, vmin=-4, vmax=4, cmap="twilight_shifted")
+                ax2.set_title(f"Ground Truth (t={step})", fontsize=12, fontweight="bold")
                 ax2.axis("off")
-
-                cbar_ax1 = fig.add_axes([0.15, 0.52, 0.7, 0.02])
-                fig.colorbar(im0, cax=cbar_ax1, orientation="horizontal")
-
-                cbar_ax2 = fig.add_axes([0.15, 0.05, 0.7, 0.02])
-                fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal", label="Error")
-
+                
+                # Error
+                ax3 = fig.add_subplot(1, 3, 3)
+                error_max = max(abs(error_data.min()), abs(error_data.max()))
+                im3 = ax3.imshow(error_data, vmin=-error_max, vmax=error_max, cmap="RdBu_r")
+                ax3.set_title(f"Error (t={step})", fontsize=12, fontweight="bold")
+                ax3.axis("off")
+                
+                # Add colorbars
+                fig.subplots_adjust(bottom=0.15, wspace=0.3)
+                cbar_ax1 = fig.add_axes([0.08, 0.08, 0.22, 0.03])
+                fig.colorbar(im1, cax=cbar_ax1, orientation="horizontal")
+                cbar_ax2 = fig.add_axes([0.39, 0.08, 0.22, 0.03])
+                fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal")
+                cbar_ax3 = fig.add_axes([0.70, 0.08, 0.22, 0.03])
+                fig.colorbar(im3, cax=cbar_ax3, orientation="horizontal")
+                
                 fname = f"comparison_{step:0{pad_width}d}.png"
                 plt.savefig(
                     os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
@@ -625,8 +660,13 @@ def main():
         default=True,
         help="Perform spectral analysis",
     )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed for reproducibility"
+    )
 
     args = parser.parse_args()
+
+    pl.seed_everything(args.seed)
 
     if not os.path.exists(args.config):
         raise FileNotFoundError(f"Config file not found: {args.config}")
