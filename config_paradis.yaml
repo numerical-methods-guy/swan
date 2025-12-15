@@ -18,6 +18,7 @@ model:
   paradis:
     hidden_dim: 16      # Latent space dimension
     num_layers: 4       # Number of ADR (Advection-Diffusion-Reaction) layers
+    num_encoder_layers: 1  # Number of layers in input projection
     num_vels: 6         # Number of velocity channels
     diffusion_size: 10  # Hidden dimension for diffusion operator
     reaction_size: 7    # Hidden dimension for reaction operator
@@ -29,7 +30,8 @@ training:
   learning_rate: 1.0e-2
   finetune_learning_rate: 1.0e-4
   pretrain_epochs: 100
-  finetune_epochs: 10
+  finetune_epochs: 0
+  nfuture: 1
   amp_mode: "none"      # Options: "none", "fp16", "bf16"
   log_every_n_steps: 10
   save_dir: "./logs"

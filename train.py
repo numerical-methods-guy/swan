@@ -74,9 +74,9 @@ class SWELightningModule(pl.LightningModule):
         self.nlon = config["data"]["nlon"]
         self.grid = config["data"]["grid"]
         self.model_type = config["experiment"]["model_type"]
-        
+
         # PARADIS always uses winds
-        self.use_winds = (self.model_type == "paradis")
+        self.use_winds = self.model_type == "paradis"
 
         if self.model_type == "sfno":
             self.model = self._create_sfno_model()
@@ -162,10 +162,10 @@ class SWELightningModule(pl.LightningModule):
         if self.use_winds:
             inp_fields, inp_winds, tar_fields, tar_winds = batch
             prd = self.model(inp_fields, inp_winds)
-            
+
             for _ in range(self.nfuture):
                 prd = self.model(prd, inp_winds)
-            
+
             loss = self.loss_fn(prd, tar_fields)
         else:
             inp, tar = batch
@@ -181,10 +181,10 @@ class SWELightningModule(pl.LightningModule):
         if self.use_winds:
             inp_fields, inp_winds, tar_fields, tar_winds = batch
             prd = self.model(inp_fields, inp_winds)
-            
+
             for _ in range(self.nfuture):
                 prd = self.model(prd, inp_winds)
-            
+
             loss = self.loss_fn(prd, tar_fields)
             l1 = self.metric_l1(prd, tar_fields)
             l2 = self.metric_l2(prd, tar_fields)
@@ -239,11 +239,11 @@ def create_datasets(config, device):
     nlat = config["data"]["nlat"]
     nlon = config["data"]["nlon"]
     grid = config["data"]["grid"]
-    
+
     # PARADIS always uses winds
     model_type = config["experiment"]["model_type"]
-    use_winds = (model_type == "paradis")
-    
+    use_winds = model_type == "paradis"
+
     if use_winds:
         train_dataset = PdeDatasetWithWinds(
             dt=dt,
@@ -411,7 +411,7 @@ def main():
         train_dataset.nsteps = new_nsteps
         val_dataset.nsteps = new_nsteps
 
-        model.nfuture = 1
+        model.nfuture = config["training"]["nfuture"]
 
         finetune_logger = TensorBoardLogger(
             config["training"]["save_dir"],

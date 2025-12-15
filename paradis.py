@@ -1,10 +1,15 @@
 """Paradis neural architecture adapted for shallow water equations."""
 
+import math
 import torch
 from torch import nn
 from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Union, Type, Tuple
+
+
+def get_scaled_timestep(original_timestep_seconds: float) -> float:
+    return original_timestep_seconds * 7.29212e-5
 
 
 class GeoCyclicPadding(torch.nn.Module):
@@ -132,6 +137,7 @@ class GlobalBias(nn.Module):
             y = self.bias
         else:
             y = torch.einsum("iab,ji->jab", self.bias, self.projection.weight)
+
         x = x + y[..., :, :, :]
         return x
 
@@ -246,7 +252,6 @@ class NeuralSemiLagrangian(nn.Module):
         lat_grid: torch.Tensor,
         lon_grid: torch.Tensor,
         interpolation: str = "bicubic",
-        bias_channels: int = 4,
     ):
         super().__init__()
 
@@ -276,17 +281,6 @@ class NeuralSemiLagrangian(nn.Module):
         )
 
         self.interpolation = interpolation
-
-        self.velocity_net = GMBlock(
-            layers=["SepConv"],
-            input_dim=hidden_dim,
-            output_dim=2 * num_vels,
-            hidden_dim=hidden_dim,
-            kernel_size=3,
-            mesh_size=mesh_size,
-            bias_channels=bias_channels,
-            pre_normalize=True,
-        )
 
         H, W = mesh_size
 
@@ -338,17 +332,13 @@ class NeuralSemiLagrangian(nn.Module):
     def forward(
         self,
         hidden_features: torch.Tensor,
+        u: torch.Tensor,
+        v: torch.Tensor,
         dt: float,
     ) -> torch.Tensor:
         """Compute advection using rotated coordinate system."""
         batch_size = hidden_features.shape[0]
         H, W = self.mesh_size
-
-        velocities = self.velocity_net(hidden_features)
-        velocities = velocities.reshape(batch_size, 2, self.num_vels, H, W)
-
-        u = velocities[:, 0]
-        v = velocities[:, 1]
 
         projected_inputs = self.down_projection(hidden_features)
 
@@ -403,8 +393,6 @@ class NeuralSemiLagrangian(nn.Module):
 class ParadisModel(nn.Module):
     """Paradis model adapted for shallow water equations."""
 
-    SYNOPTIC_TIME_SCALE = 7.29212e5
-
     def __init__(self, config):
         super().__init__()
 
@@ -423,16 +411,14 @@ class ParadisModel(nn.Module):
         model_config = config["model"]["paradis"]
 
         hidden_dim = model_config["hidden_dim"]
-        num_vels = model_config["num_vels"]
+        # Save num_vels to self so it can be used in forward() for reshaping
+        self.num_vels = model_config["num_vels"]
         diffusion_size = model_config["diffusion_size"]
         reaction_size = model_config["reaction_size"]
 
         adv_interpolation = model_config["interpolation"]
         bias_channels = model_config.get("bias_channels", 4)
-
-        self.field_channels = 3  # h, vorticity, divergence
-        self.wind_channels = 2  # u, v
-        self.total_input_channels = 5  # fields + winds
+        num_encoder_layers = model_config.get("num_encoder_layers", 1)
 
         dlat = 180.0 / (self.nlat - 1)
         dlon = 360.0 / self.nlon
@@ -444,30 +430,60 @@ class ParadisModel(nn.Module):
         lat_grid = torch.deg2rad(lat_grid)
         lon_grid = torch.deg2rad(lon_grid)
 
-        self.input_proj = GMBlock(
-            layers=["SepConv"] * 2,
-            input_dim=self.total_input_channels,
-            output_dim=hidden_dim,
-            hidden_dim=hidden_dim,
-            mesh_size=mesh_size,
-            bias_channels=bias_channels,
-            pre_normalize=True,
-        )
+        # Input projection
+        self.activation_function = nn.SiLU
+
+        input_dim = 5  # Number of channels in input
+        current_dim = input_dim
+        encoder_layers = []
+        bias = False
+        for l in range(num_encoder_layers - 1):
+            fc = nn.Conv2d(current_dim, hidden_dim, 1, bias=True)
+            # Initialize the weights correctly
+            scale = math.sqrt(2.0 / current_dim)
+            nn.init.normal_(fc.weight, mean=0.0, std=scale)
+            if fc.bias is not None:
+                nn.init.constant_(fc.bias, 0.0)
+            encoder_layers.append(fc)
+            encoder_layers.append(self.activation_function())
+            current_dim = hidden_dim
+        fc = nn.Conv2d(current_dim, hidden_dim, 1, bias=bias)
+        scale = math.sqrt(1.0 / current_dim)
+        nn.init.normal_(fc.weight, mean=0.0, std=scale)
+        if fc.bias is not None:
+            nn.init.constant_(fc.bias, 0.0)
+        encoder_layers.append(fc)
+        self.input_proj = nn.Sequential(*encoder_layers)
 
         self.num_layers = max(1, model_config["num_layers"])
-        dt = config["data"]["dt"]
-        self.dt = dt / self.SYNOPTIC_TIME_SCALE / self.num_layers
+
+        self.dt = get_scaled_timestep(config["data"]["dt"]) / self.num_layers
+
+        self.velocity_nets = nn.ModuleList(
+            [
+                GMBlock(
+                    layers=["SepConv"],
+                    input_dim=hidden_dim,
+                    output_dim=2 * self.num_vels,
+                    hidden_dim=hidden_dim,
+                    kernel_size=3,
+                    mesh_size=mesh_size,
+                    bias_channels=bias_channels,
+                    pre_normalize=True,
+                )
+                for _ in range(self.num_layers)
+            ]
+        )
 
         self.advection = nn.ModuleList(
             [
                 NeuralSemiLagrangian(
                     hidden_dim,
                     mesh_size,
-                    num_vels=num_vels,
+                    num_vels=self.num_vels,
                     lat_grid=lat_grid,
                     lon_grid=lon_grid,
                     interpolation=adv_interpolation,
-                    bias_channels=bias_channels,
                 )
                 for _ in range(self.num_layers)
             ]
@@ -534,9 +550,18 @@ class ParadisModel(nn.Module):
         x = torch.cat([fields, winds], dim=1)
 
         hidden = self.input_proj(x)
+        batch_size = hidden.shape[0]
 
         for i in range(self.num_layers):
-            advected = self.advection[i](hidden, self.dt)
+            velocities_raw = self.velocity_nets[i](hidden)
+
+            velocities = velocities_raw.reshape(
+                batch_size, 2, self.num_vels, self.nlat, self.nlon
+            )
+            u = velocities[:, 0]
+            v = velocities[:, 1]
+
+            advected = self.advection[i](hidden, u, v, self.dt)
             hidden = hidden + advected
 
             diffused = self.diffusion[i](hidden)
@@ -545,6 +570,4 @@ class ParadisModel(nn.Module):
             reacted = self.reaction[i](hidden)
             hidden = hidden + reacted
 
-        output = self.output_proj(hidden)
-
-        return output
+        return self.output_proj(hidden)

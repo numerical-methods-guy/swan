@@ -388,30 +388,34 @@ def autoregressive_inference_with_winds(
 
             if save_plots:
                 fig = plt.figure(figsize=(18, 5))
-                
+
                 pred_data = prd_fields[0, plot_channel].cpu().numpy()
                 truth_data = ref_fields[0, plot_channel].cpu().numpy()
                 error_data = pred_data - truth_data
-                
+
                 # Prediction
                 ax1 = fig.add_subplot(1, 3, 1)
                 im1 = ax1.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
                 ax1.set_title(f"Prediction (t={step})", fontsize=12, fontweight="bold")
                 ax1.axis("off")
-                
+
                 # Ground Truth
                 ax2 = fig.add_subplot(1, 3, 2)
                 im2 = ax2.imshow(truth_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-                ax2.set_title(f"Ground Truth (t={step})", fontsize=12, fontweight="bold")
+                ax2.set_title(
+                    f"Ground Truth (t={step})", fontsize=12, fontweight="bold"
+                )
                 ax2.axis("off")
-                
+
                 # Error
                 ax3 = fig.add_subplot(1, 3, 3)
                 error_max = max(abs(error_data.min()), abs(error_data.max()))
-                im3 = ax3.imshow(error_data, vmin=-error_max, vmax=error_max, cmap="RdBu_r")
+                im3 = ax3.imshow(
+                    error_data, vmin=-error_max, vmax=error_max, cmap="RdBu_r"
+                )
                 ax3.set_title(f"Error (t={step})", fontsize=12, fontweight="bold")
                 ax3.axis("off")
-                
+
                 # Add colorbars
                 fig.subplots_adjust(bottom=0.15, wspace=0.3)
                 cbar_ax1 = fig.add_axes([0.08, 0.08, 0.22, 0.03])
@@ -420,7 +424,7 @@ def autoregressive_inference_with_winds(
                 fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal")
                 cbar_ax3 = fig.add_axes([0.70, 0.08, 0.22, 0.03])
                 fig.colorbar(im3, cax=cbar_ax3, orientation="horizontal")
-                
+
                 fname = f"comparison_{step:0{pad_width}d}.png"
                 plt.savefig(
                     os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
@@ -564,30 +568,34 @@ def autoregressive_inference(
 
             if save_plots:
                 fig = plt.figure(figsize=(18, 5))
-                
+
                 pred_data = prd[0, plot_channel].cpu().numpy()
                 truth_data = ref[0, plot_channel].cpu().numpy()
                 error_data = pred_data - truth_data
-                
+
                 # Prediction
                 ax1 = fig.add_subplot(1, 3, 1)
                 im1 = ax1.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
                 ax1.set_title(f"Prediction (t={step})", fontsize=12, fontweight="bold")
                 ax1.axis("off")
-                
+
                 # Ground Truth
                 ax2 = fig.add_subplot(1, 3, 2)
                 im2 = ax2.imshow(truth_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-                ax2.set_title(f"Ground Truth (t={step})", fontsize=12, fontweight="bold")
+                ax2.set_title(
+                    f"Ground Truth (t={step})", fontsize=12, fontweight="bold"
+                )
                 ax2.axis("off")
-                
+
                 # Error
                 ax3 = fig.add_subplot(1, 3, 3)
                 error_max = max(abs(error_data.min()), abs(error_data.max()))
-                im3 = ax3.imshow(error_data, vmin=-error_max, vmax=error_max, cmap="RdBu_r")
+                im3 = ax3.imshow(
+                    error_data, vmin=-error_max, vmax=error_max, cmap="RdBu_r"
+                )
                 ax3.set_title(f"Error (t={step})", fontsize=12, fontweight="bold")
                 ax3.axis("off")
-                
+
                 # Add colorbars
                 fig.subplots_adjust(bottom=0.15, wspace=0.3)
                 cbar_ax1 = fig.add_axes([0.08, 0.08, 0.22, 0.03])
@@ -596,7 +604,7 @@ def autoregressive_inference(
                 fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal")
                 cbar_ax3 = fig.add_axes([0.70, 0.08, 0.22, 0.03])
                 fig.colorbar(im3, cax=cbar_ax3, orientation="horizontal")
-                
+
                 fname = f"comparison_{step:0{pad_width}d}.png"
                 plt.savefig(
                     os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
