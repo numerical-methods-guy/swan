@@ -11,8 +11,8 @@ data:
   batch_size: 4
   num_workers: 0        # Set to 0 if dataset generation issues occur
   grid: "equiangular"  # PARADIS requires equiangular grid
-  num_train_examples: 256
-  num_val_examples: 32
+  num_train_examples: 512
+  num_val_examples: 64
 
 model:
   paradis:
@@ -27,7 +27,7 @@ model:
     bias_channels: 2     # Number of learned bias channels
 
 training:
-  learning_rate: 1.0e-2
+  learning_rate: 1.0e-3
   finetune_learning_rate: 1.0e-4
   pretrain_epochs: 100
   finetune_epochs: 0
