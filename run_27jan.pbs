@@ -1,0 +1,84 @@
+#!/bin/bash
+#PBS -N paradis_dt50_train1024_pre100_ft25_gbells_27jan
+#PBS -q gpu
+#PBS -l select=1:ncpus=12:mpiprocs=1:ngpus=1:mem=109G
+#PBS -l walltime=12:00:00
+#PBS -j n
+#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/27jan_paradis_dt50_train1024_pre100_ft25_gbells.out
+#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/27jan_paradis_dt50_train1024_pre100_ft25_gbells.err
+
+# IMPORTANT: do NOT use -e (we want "no fail")
+set -u -o pipefail
+
+REPO="/space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan"
+PY="/home/csu001/data/ppp5/conda_env/paradis/bin/python"
+
+mkdir -p "$REPO/err_out/out" "$REPO/err_out/err"
+cd "$REPO"
+
+echo "HOST: $(hostname)"
+echo "CWD:  $(pwd)"
+echo "PY:   $PY"
+echo "TIME: $(date)"
+echo "GPU:"
+nvidia-smi || true
+
+# =========================
+# FIXED SETTINGS (UPDATED)
+# =========================
+MODEL="paradis"
+CONFIG="config_paradis.yaml"
+SAVE_DIR="trial2"
+
+DT_SOLVER=50
+NTRAIN=1024
+PRE_EPOCHS=100
+FT_EPOCHS=25
+SEED=42
+
+EXP_NAME="${MODEL}_dt${DT_SOLVER}_train${NTRAIN}_pre${PRE_EPOCHS}_ft${FT_EPOCHS}_seed${SEED}_gbells_27jan"
+LOG_DIR="$REPO/$SAVE_DIR/pbs_logs"
+mkdir -p "$REPO/$SAVE_DIR" "$LOG_DIR"
+
+LOG_FILE="$LOG_DIR/${EXP_NAME}.log"
+FAIL_SUMMARY="$LOG_DIR/failures_${EXP_NAME}_$(date +%Y%m%d_%H%M%S).txt"
+: > "$FAIL_SUMMARY"
+
+echo "============================================================" | tee "$LOG_FILE"
+echo "START: $(date)" | tee -a "$LOG_FILE"
+echo "MODEL: $MODEL" | tee -a "$LOG_FILE"
+echo "CONFIG: $CONFIG" | tee -a "$LOG_FILE"
+echo "EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+echo "SAVE_DIR: $SAVE_DIR" | tee -a "$LOG_FILE"
+echo "dt_solver=$DT_SOLVER  ntrain=$NTRAIN  pre=$PRE_EPOCHS  ft=$FT_EPOCHS  seed=$SEED" | tee -a "$LOG_FILE"
+echo "============================================================" | tee -a "$LOG_FILE"
+
+# Run (GPU0 of allocation)
+CUDA_VISIBLE_DEVICES=0 $PY avi_train_gbell_train_gbell_val_2.py \
+  --config "$CONFIG" \
+  --experiment.name "$EXP_NAME" \
+  --experiment.seed "$SEED" \
+  --training.save_dir "$SAVE_DIR" \
+  --data.dt_solver "$DT_SOLVER" \
+  --data.num_train_examples "$NTRAIN" \
+  --training.pretrain_epochs "$PRE_EPOCHS" \
+  --training.finetune_epochs "$FT_EPOCHS" \
+  >> "$LOG_FILE" 2>&1
+
+RC=$?
+
+if [[ $RC -ne 0 ]]; then
+  echo "[FAIL] $(date) rc=$RC EXP=$EXP_NAME" | tee -a "$LOG_FILE" >> "$FAIL_SUMMARY"
+  echo "Command failed, but PBS job will exit cleanly." | tee -a "$LOG_FILE"
+else
+  echo "[OK]   $(date) rc=0 EXP=$EXP_NAME" | tee -a "$LOG_FILE"
+fi
+
+echo "============================================================" | tee -a "$LOG_FILE"
+echo "DONE: $(date)  EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+echo "Log:  $LOG_FILE" | tee -a "$LOG_FILE"
+echo "Fail summary: $FAIL_SUMMARY" | tee -a "$LOG_FILE"
+echo "============================================================" | tee -a "$LOG_FILE"
+
+exit 0
+

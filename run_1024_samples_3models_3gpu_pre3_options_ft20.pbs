@@ -1,0 +1,87 @@
+#!/bin/bash
+#PBS -N swe_1024_3models_3gpu_pre85_95_105_ft20
+#PBS -q gpu
+#PBS -l select=1:ncpus=36:mpiprocs=3:ngpus=3:mem=327G
+#PBS -l walltime=12:00:00
+#PBS -j n
+#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/swe_3models_3gpu.out
+#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/swe_3models_3gpu.err
+
+set -euo pipefail
+
+REPO="/space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan"
+PY="/home/csu001/data/ppp5/conda_env/paradis/bin/python"
+
+mkdir -p "$REPO/err_out/out" "$REPO/err_out/err"
+cd "$REPO"
+
+echo "HOST: $(hostname)"
+echo "CWD:  $(pwd)"
+echo "PY:   $PY"
+echo "TIME: $(date)"
+echo "GPU:"
+nvidia-smi || true
+
+# --- FIXED SETTINGS YOU REQUESTED ---
+DT_SOLVER=50
+NTRAIN=1024
+FT_EPOCHS=15
+SAVE_DIR="trial2"
+PRETRAIN_LIST=(55 65 75)
+
+mkdir -p "$REPO/$SAVE_DIR"
+mkdir -p "$REPO/$SAVE_DIR/pbs_logs"
+
+run_model_on_gpu () {
+  local MODEL="$1"        # paradis | sfno | transformer
+  local CONFIG="$2"       # config_paradis.yaml | config_sfno.yaml | config_transformer.yaml
+  local GPU_ID="$3"       # 0 | 1 | 2
+
+  for PRE in "${PRETRAIN_LIST[@]}"; do
+    EXP_NAME="${MODEL}_dt${DT_SOLVER}_train${NTRAIN}_pre${PRE}_ft${FT_EPOCHS}_seed42"
+    LOG_FILE="$REPO/$SAVE_DIR/pbs_logs/${EXP_NAME}.log"
+
+    echo "============================================================" | tee -a "$LOG_FILE"
+    echo "START: $(date)" | tee -a "$LOG_FILE"
+    echo "MODEL: $MODEL  GPU: $GPU_ID" | tee -a "$LOG_FILE"
+    echo "CONFIG: $CONFIG" | tee -a "$LOG_FILE"
+    echo "EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+    echo "============================================================" | tee -a "$LOG_FILE"
+
+    CUDA_VISIBLE_DEVICES="$GPU_ID" $PY train.py \
+      --config "$CONFIG" \
+      --experiment.name "$EXP_NAME" \
+      --experiment.seed 42 \
+      --training.save_dir "$SAVE_DIR" \
+      --data.dt_solver "$DT_SOLVER" \
+      --data.num_train_examples "$NTRAIN" \
+      --training.pretrain_epochs "$PRE" \
+      --training.finetune_epochs "$FT_EPOCHS" \
+      >> "$LOG_FILE" 2>&1
+
+    echo "DONE: $(date)  EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+  done
+}
+
+# --- PARALLEL: 3 processes, one per GPU ---
+# GPU0: PARADIS
+run_model_on_gpu "paradis" "config_paradis.yaml" 0 &
+PID0=$!
+
+# GPU1: SFNO
+run_model_on_gpu "sfno" "config_sfno.yaml" 1 &
+PID1=$!
+
+# GPU2: TRANSFORMER
+run_model_on_gpu "transformer" "config_transformer.yaml" 2 &
+PID2=$!
+
+# Wait for all three to finish
+wait $PID0
+wait $PID1
+wait $PID2
+
+echo "============================================================"
+echo "ALL RUNS COMPLETE: $(date)"
+echo "Logs: $REPO/$SAVE_DIR/pbs_logs"
+echo "============================================================"

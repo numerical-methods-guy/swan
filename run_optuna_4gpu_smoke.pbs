@@ -1,0 +1,39 @@
+#!/bin/bash
+#PBS -N paradis_optuna_4gpu_smoke
+#PBS -q gpu
+#PBS -l select=1:ncpus=48:mpiprocs=4:ngpus=4:mem=216G
+#PBS -l walltime=01:00:00
+#PBS -j n
+#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/paradis_optuna_4gpu_smoke.out
+#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/paradis_optuna_4gpu_smoke.err
+
+set -euo pipefail
+
+REPO="/space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan"
+PY="/home/csu001/data/ppp5/conda_env/paradis/bin/python"
+
+mkdir -p "$REPO/err_out/out" "$REPO/err_out/err"
+cd "$REPO"
+
+echo "HOST: $(hostname)"
+echo "CWD:  $(pwd)"
+echo "PY:   $PY"
+echo "TIME: $(date)"
+nvidia-smi || true
+
+$PY -c "import torch; print('torch', torch.__version__, 'cuda?', torch.cuda.is_available())"
+$PY -c "import optuna; print('optuna', optuna.__version__)"
+
+# SMOKE TEST: each trial is 2 pretrain + 2 finetune, dt_solver=75
+$PY optuna_paradis_sweep_smoke.py \
+  --repo_dir "$REPO" \
+  --python_bin "$PY" \
+  --config "config_paradis.yaml" \
+  --save_dir "trial" \
+  --dt_solver 75 \
+  --n_trials 4 \
+  --n_jobs 4 \
+  --study_name "SMOKE_paradis_dt75" \
+  --storage "sqlite:///trial/optuna_dt75_smoke.db" \
+  --seed 42
+
