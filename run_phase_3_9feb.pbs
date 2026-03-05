@@ -1,11 +1,11 @@
 #!/bin/bash
-#PBS -N paradis_dt50_train1024_pre100_ft25_gbells_9feb
+#PBS -N paradis_dt50_train1024_pre100_ft25_gbells_12feb
 #PBS -q gpu
 #PBS -l select=1:ncpus=12:mpiprocs=1:ngpus=1:mem=109G
 #PBS -l walltime=12:00:00
 #PBS -j n
-#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/9feb_phase3_paradis_dt50_train1024_pre100_ft25_gbells.out
-#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/9feb_phase3_paradis_dt50_train1024_pre100_ft25_gbells.err
+#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/12feb_phase3_paradis_dt50_train1024_pre100_ft25_gbells.out
+#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/12feb_phase3_paradis_dt50_train1024_pre100_ft25_gbells.err
 
 # IMPORTANT: do NOT use -e (we want "no fail")
 set -u -o pipefail
@@ -32,11 +32,11 @@ SAVE_DIR="trial2"
 
 DT_SOLVER=50
 NTRAIN=1024
-PRE_EPOCHS=100
-FT_EPOCHS=25
+PRE_EPOCHS=120
+FT_EPOCHS=0
 SEED=42
 
-EXP_NAME="${MODEL}_dt${DT_SOLVER}_train${NTRAIN}_pre${PRE_EPOCHS}_ft${FT_EPOCHS}_seed${SEED}_gbells_9feb_phase3"
+EXP_NAME="${MODEL}_dt${DT_SOLVER}_train${NTRAIN}_pre${PRE_EPOCHS}_ft${FT_EPOCHS}_seed${SEED}_gbells_12feb_phase3"
 LOG_DIR="$REPO/$SAVE_DIR/pbs_logs"
 mkdir -p "$REPO/$SAVE_DIR" "$LOG_DIR"
 
@@ -54,7 +54,7 @@ echo "dt_solver=$DT_SOLVER  ntrain=$NTRAIN  pre=$PRE_EPOCHS  ft=$FT_EPOCHS  seed
 echo "============================================================" | tee -a "$LOG_FILE"
 
 # Run (GPU0 of allocation)
-CUDA_VISIBLE_DEVICES=0 $PY avi_train_gbell_train_gbell_val_AMSE_Loss.py \
+CUDA_VISIBLE_DEVICES=0 $PY avi_train_gbell_train_gbell_val_AMSE_Loss_v2.py \
   --config "$CONFIG" \
   --experiment.name "$EXP_NAME" \
   --experiment.seed "$SEED" \
@@ -63,6 +63,8 @@ CUDA_VISIBLE_DEVICES=0 $PY avi_train_gbell_train_gbell_val_AMSE_Loss.py \
   --data.num_train_examples "$NTRAIN" \
   --training.pretrain_epochs "$PRE_EPOCHS" \
   --training.finetune_epochs "$FT_EPOCHS" \
+  --init_from trial2/paradis_dt50_train1024_rollloss_b3_r6_ft40_lr0.00005_seed42_3feb_rolloutloss/version_0/checkpoints/last.ckpt \
+  --training.learning_rate 0.0004 \
   >> "$LOG_FILE" 2>&1
 
 RC=$?

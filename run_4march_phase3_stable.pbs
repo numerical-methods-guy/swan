@@ -1,11 +1,11 @@
 #!/bin/bash
-#PBS -N paradis_dt50_train1024_rollloss_b3_r6_31feb
+#PBS -N paradis_gbell_train_gbell_val_all_channel_4march_burn_AMSE
 #PBS -q gpu
 #PBS -l select=1:ncpus=12:mpiprocs=1:ngpus=1:mem=109G
 #PBS -l walltime=12:00:00
 #PBS -j n
-#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/31feb_paradis_rollloss_b3_r6.out
-#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/31feb_paradis_rollloss_b3_r6.err
+#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/AMSE_4march_paradis_gbell_all_channel_burn.out
+#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/AMSE_4march_paradis_gbell_all_channel_burn.err
 
 # IMPORTANT: do NOT use -e (we want "no fail")
 set -u -o pipefail
@@ -28,53 +28,77 @@ nvidia-smi || true
 # =========================
 MODEL="paradis"
 CONFIG="config_paradis.yaml"
-SAVE_DIR="trial2"
+SAVE_DIR="trial4_4march_AMSE"
 
-DT_SOLVER=50
+# Script to run
+PY_SCRIPT="avi_train_gbell_train_gbell_val_AMSE_Loss_all_channel_burnin.py"
+
+# Data / solver
+DT_SOLVER=25
 NTRAIN=1024
-SEED=42
+SEED=47
+PTEP=0
+FTEP=100
 
 # Rollout-loss settings
 BURN_IN=3
-N_ROLLOUT=6
+N_ROLLOUT=8
 
-# Finetune controls (recommended)
-FT_EPOCHS=40
-FT_LR="0.00005"
+# Architecture (should match init checkpoint)
+HD=48
+L=8
+ENC=3
+VEL=6
+DIFF=24
+REACT=12
+BIAS=3
+LRATE=0.00005
 
-# Pretrain checkpoint to start from (best ckpt you gave)
-PRETRAIN_CKPT="trial2/paradis_dt50_train1024_pre100_ft25_seed42_gbells_27jan/version_0/checkpoints/pretrain-epoch=55-val_loss=0.0006.ckpt"
 
-EXP_NAME="${MODEL}_dt${DT_SOLVER}_train${NTRAIN}_rollloss_b${BURN_IN}_r${N_ROLLOUT}_ft${FT_EPOCHS}_lr${FT_LR}_seed${SEED}_31feb"
-LOG_DIR="$REPO/$SAVE_DIR/pbs_logs"
+# Init checkpoint (weights-only init)
+INIT_CKPT="trial4_4march/paradis_gbell_train_gbell_val_all_channel_rollout_dt25_train1024_hd48_L8_enc3_vel6_diff24_react12_bias3_seed42_lr0.00005_Burn3_rollout9_finetune_epochs100_4march_rolloutloss/version_0/checkpoints/rolloutloss-epoch=20-val_loss=0.0242.ckpt"
+
+EXP_NAME="${MODEL}_gbell_train_gbell_val_all_channel_rollout_dt${DT_SOLVER}_train${NTRAIN}_hd${HD}_L${L}_enc${ENC}_vel${VEL}_diff${DIFF}_react${REACT}_bias${BIAS}_seed${SEED}_lr${LRATE}_Burn${BURN_IN}_rollout${N_ROLLOUT}_finetune_epochs${FTEP}_4march_AMSE"
+
+LOG_DIR="$REPO/$SAVE_DIR/pbs_logs_4march_AMSE"
 mkdir -p "$REPO/$SAVE_DIR" "$LOG_DIR"
 
 LOG_FILE="$LOG_DIR/${EXP_NAME}.log"
-FAIL_SUMMARY="$LOG_DIR/failures_${EXP_NAME}_$(date +%Y%m%d_%H%M%S).txt"
+FAIL_SUMMARY="$LOG_DIR/failures_${EXP_NAME}_$(date +%Y%m%d_%H%M%S)_4march_AMSE.txt"
 : > "$FAIL_SUMMARY"
 
 echo "============================================================" | tee "$LOG_FILE"
 echo "START: $(date)" | tee -a "$LOG_FILE"
 echo "MODEL: $MODEL" | tee -a "$LOG_FILE"
+echo "SCRIPT: $PY_SCRIPT" | tee -a "$LOG_FILE"
 echo "CONFIG: $CONFIG" | tee -a "$LOG_FILE"
 echo "EXP: $EXP_NAME" | tee -a "$LOG_FILE"
 echo "SAVE_DIR: $SAVE_DIR" | tee -a "$LOG_FILE"
 echo "dt_solver=$DT_SOLVER  ntrain=$NTRAIN  seed=$SEED" | tee -a "$LOG_FILE"
-echo "pretrain_ckpt=$PRETRAIN_CKPT" | tee -a "$LOG_FILE"
-echo "burn_in=$BURN_IN  n_rollout=$N_ROLLOUT  ft_epochs=$FT_EPOCHS  ft_lr=$FT_LR" | tee -a "$LOG_FILE"
+echo "ARCH: hd=$HD L=$L enc=$ENC vel=$VEL diff=$DIFF react=$REACT bias=$BIAS" | tee -a "$LOG_FILE"
+echo "init_ckpt=$INIT_CKPT" | tee -a "$LOG_FILE"
+echo "burn_in=$BURN_IN  n_rollout=$N_ROLLOUT  ft_epochs=$FTEP  ft_lr=$LRATE" | tee -a "$LOG_FILE"
 echo "============================================================" | tee -a "$LOG_FILE"
 
 # Run (GPU0 of allocation)
-CUDA_VISIBLE_DEVICES=0 $PY avi_train_rollout_loss_burnin.py \
+CUDA_VISIBLE_DEVICES=0 $PY $PY_SCRIPT \
   --config "$CONFIG" \
   --experiment.name "$EXP_NAME" \
   --experiment.seed "$SEED" \
   --training.save_dir "$SAVE_DIR" \
   --data.dt_solver "$DT_SOLVER" \
   --data.num_train_examples "$NTRAIN" \
-  --training.finetune_epochs "$FT_EPOCHS" \
-  --training.finetune_learning_rate "$FT_LR" \
-  --pretrain_ckpt "$PRETRAIN_CKPT" \
+  --training.finetune_epochs "$FTEP" \
+  --training.pretrain_epochs "$PTEP" \
+  --training.finetune_learning_rate "$LRATE" \
+  --model.paradis.hidden_dim "$HD" \
+  --model.paradis.num_layers "$L" \
+  --model.paradis.num_encoder_layers "$ENC" \
+  --model.paradis.num_vels "$VEL" \
+  --model.paradis.diffusion_size "$DIFF" \
+  --model.paradis.reaction_size "$REACT" \
+  --model.paradis.bias_channels "$BIAS" \
+  --init_from "$INIT_CKPT" \
   --burn_in "$BURN_IN" \
   --n_rollout "$N_ROLLOUT" \
   >> "$LOG_FILE" 2>&1
@@ -95,4 +119,3 @@ echo "Fail summary: $FAIL_SUMMARY" | tee -a "$LOG_FILE"
 echo "============================================================" | tee -a "$LOG_FILE"
 
 exit 0
-

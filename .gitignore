@@ -221,3 +221,16 @@ optuna/*
 !trial_optuna/.gitkeep
 !err_out/.gitkeep
 !optuna/.gitkeep
+# Keep trial directories but not their contents
+trial3_3march/*
+trial4_4march/*
+trial2_24feb/*
+trial3_3march_berhu/*
+trial_optuna/*
+
+# Allow placeholder files so directories exist in git
+!trial3_3march/.gitkeep
+!trial4_4march/.gitkeep
+!trial2_24feb/.gitkeep
+!trial3_3march_berhu/.gitkeep
+!trial_optuna/.gitkeep

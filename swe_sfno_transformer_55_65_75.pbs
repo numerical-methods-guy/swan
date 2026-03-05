@@ -1,0 +1,201 @@
+#!/bin/bash
+#PBS -N swe_sfno_tf_dt50_grid2_size2_pre75
+#PBS -q gpu
+#PBS -l select=1:ncpus=24:mpiprocs=2:ngpus=2:mem=212G
+#PBS -l walltime=12:00:00
+#PBS -j n
+#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/swe_sfno_tf_dt50_grid2_size2_pre75.out
+#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/swe_sfno_tf_dt50_grid2_size2_pre75.err
+
+# Robust mode:
+# -u: error on unset vars
+# -o pipefail: propagate pipe errors
+# (NO -e, because you want "keep going" behavior)
+set -u -o pipefail
+
+REPO="/space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan"
+PY="/home/csu001/data/ppp5/conda_env/paradis/bin/python"
+
+mkdir -p "$REPO/err_out/out" "$REPO/err_out/err"
+cd "$REPO"
+
+echo "HOST: $(hostname)"
+echo "CWD:  $(pwd)"
+echo "PY:   $PY"
+echo "TIME: $(date)"
+echo "GPU:"
+nvidia-smi || true
+
+# =========================
+# FIXED SETTINGS (your ask)
+# =========================
+DT_SOLVER=50
+NTRAIN=1024
+PRE_EPOCHS=75
+
+# IMPORTANT: pretrain-only for SFNO/Transformer
+# (avoids KeyError: 'nfuture' in finetune)
+FT_EPOCHS=0
+
+SAVE_DIR="trial2"
+SEED=42
+
+GRIDS=("legendre-gauss" "equiangular")
+
+mkdir -p "$REPO/$SAVE_DIR" "$REPO/$SAVE_DIR/pbs_logs"
+
+# Track failures across both background workers
+FAIL_SUMMARY="$REPO/$SAVE_DIR/pbs_logs/failures_$(date +%Y%m%d_%H%M%S).txt"
+: > "$FAIL_SUMMARY"
+
+run_one () {
+  local GPU_ID="$1"
+  shift
+  local LOG_FILE="$1"
+  shift
+
+  # Run the command, capture exit code, do NOT stop on error
+  CUDA_VISIBLE_DEVICES="$GPU_ID" "$@" >> "$LOG_FILE" 2>&1
+  local RC=$?
+
+  if [[ $RC -ne 0 ]]; then
+    echo "[FAIL] $(date) rc=$RC gpu=$GPU_ID cmd: $*" | tee -a "$LOG_FILE" >> "$FAIL_SUMMARY"
+  else
+    echo "[OK]   $(date) rc=0 gpu=$GPU_ID" | tee -a "$LOG_FILE" >/dev/null
+  fi
+
+  return 0  # always succeed so caller keeps going
+}
+
+run_sfno_suite () {
+  local GPU_ID="$1"
+  local CONFIG="config_sfno.yaml"
+  local MODEL="sfno"
+
+  for GRID in "${GRIDS[@]}"; do
+    for SIZE in "small" "balanced"; do
+
+      local EMBED LAYERS
+      if [[ "$SIZE" == "small" ]]; then
+        EMBED=32
+        LAYERS=4
+      else
+        EMBED=64
+        LAYERS=4
+      fi
+
+      local EXP_NAME="${MODEL}_dt${DT_SOLVER}_train${NTRAIN}_pre${PRE_EPOCHS}_grid${GRID}_${SIZE}_seed${SEED}"
+      local LOG_FILE="$REPO/$SAVE_DIR/pbs_logs/${EXP_NAME}.log"
+
+      {
+        echo "============================================================"
+        echo "START: $(date)"
+        echo "MODEL: $MODEL  GPU: $GPU_ID"
+        echo "CONFIG: $CONFIG"
+        echo "GRID: $GRID"
+        echo "SIZE: $SIZE (embed_dim=$EMBED, num_layers=$LAYERS)"
+        echo "EXP: $EXP_NAME"
+        echo "============================================================"
+      } | tee "$LOG_FILE"
+
+      run_one "$GPU_ID" "$LOG_FILE" \
+        "$PY" train.py \
+          --config "$CONFIG" \
+          --experiment.name "$EXP_NAME" \
+          --experiment.seed "$SEED" \
+          --training.save_dir "$SAVE_DIR" \
+          --data.dt_solver "$DT_SOLVER" \
+          --data.num_train_examples "$NTRAIN" \
+          --data.grid "$GRID" \
+          --training.pretrain_epochs "$PRE_EPOCHS" \
+          --training.finetune_epochs "$FT_EPOCHS" \
+          --model.sfno.embed_dim "$EMBED" \
+          --model.sfno.num_layers "$LAYERS"
+
+      echo "DONE: $(date)  EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+    done
+  done
+}
+
+run_transformer_suite () {
+  local GPU_ID="$1"
+  local CONFIG="config_transformer.yaml"
+  local MODEL="transformer"
+
+  for GRID in "${GRIDS[@]}"; do
+    for SIZE in "small" "balanced"; do
+
+      local EMBED LAYERS HEADS
+      if [[ "$SIZE" == "small" ]]; then
+        EMBED=32
+        LAYERS=4
+        HEADS=4
+      else
+        EMBED=64
+        LAYERS=4
+        HEADS=4
+      fi
+
+      local EXP_NAME="${MODEL}_dt${DT_SOLVER}_train${NTRAIN}_pre${PRE_EPOCHS}_grid${GRID}_${SIZE}_seed${SEED}"
+      local LOG_FILE="$REPO/$SAVE_DIR/pbs_logs/${EXP_NAME}.log"
+
+      {
+        echo "============================================================"
+        echo "START: $(date)"
+        echo "MODEL: $MODEL  GPU: $GPU_ID"
+        echo "CONFIG: $CONFIG"
+        echo "GRID: $GRID"
+        echo "SIZE: $SIZE (embed_dim=$EMBED, num_layers=$LAYERS, num_heads=$HEADS)"
+        echo "EXP: $EXP_NAME"
+        echo "============================================================"
+      } | tee "$LOG_FILE"
+
+      run_one "$GPU_ID" "$LOG_FILE" \
+        "$PY" train.py \
+          --config "$CONFIG" \
+          --experiment.name "$EXP_NAME" \
+          --experiment.seed "$SEED" \
+          --training.save_dir "$SAVE_DIR" \
+          --data.dt_solver "$DT_SOLVER" \
+          --data.num_train_examples "$NTRAIN" \
+          --data.grid "$GRID" \
+          --training.pretrain_epochs "$PRE_EPOCHS" \
+          --training.finetune_epochs "$FT_EPOCHS" \
+          --model.transformer.embed_dim "$EMBED" \
+          --model.transformer.num_layers "$LAYERS" \
+          --model.transformer.num_heads "$HEADS"
+
+      echo "DONE: $(date)  EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+    done
+  done
+}
+
+echo "============================================================"
+echo "START ALL: $(date)"
+echo "SAVE_DIR: $SAVE_DIR"
+echo "FAIL_SUMMARY: $FAIL_SUMMARY"
+echo "============================================================"
+
+run_sfno_suite 0 &
+PID0=$!
+
+run_transformer_suite 1 &
+PID1=$!
+
+# Wait for both; even if one fails internally, these waits still complete
+wait $PID0 || true
+wait $PID1 || true
+
+echo "============================================================"
+echo "ALL RUNS COMPLETE: $(date)"
+echo "Logs: $REPO/$SAVE_DIR/pbs_logs"
+echo "Failure summary: $FAIL_SUMMARY"
+echo "============================================================"
+
+if [[ -s "$FAIL_SUMMARY" ]]; then
+  echo "Some runs failed. See: $FAIL_SUMMARY"
+else
+  echo "All runs succeeded."
+fi
+
+exit 0

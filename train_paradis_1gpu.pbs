@@ -1,0 +1,41 @@
+#!/bin/bash
+#PBS -N paradis_dt50_with_wind_learning
+#PBS -q gpu
+#PBS -l select=1:ncpus=12:mpiprocs=1:ngpus=1:mem=109G
+#PBS -l walltime=01:50:00
+#PBS -j oe
+
+set -euo pipefail
+
+REPO="/space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan"
+PY="/home/csu001/data/ppp5/conda_env/paradis/bin/python"
+LOGDIR="$REPO/pbs_logs"
+mkdir -p "$LOGDIR"
+
+cd "$REPO"
+
+# timestamped logfile (no PBS vars needed)
+TS="$(date +%Y%m%d_%H%M%S)"
+LOGFILE="$LOGDIR/paradis_dt50_with_wind_learning_${TS}.log"
+
+echo "Host: $(hostname)" | tee -a "$LOGFILE"
+echo "CWD:  $(pwd)"      | tee -a "$LOGFILE"
+echo "PY:   $PY"         | tee -a "$LOGFILE"
+echo "Time: $(date)"     | tee -a "$LOGFILE"
+echo "GPU:"              | tee -a "$LOGFILE"
+nvidia-smi 2>&1 | tee -a "$LOGFILE" || true
+
+# sanity imports
+$PY -c "import torch; print('torch', torch.__version__, 'cuda?', torch.cuda.is_available())" 2>&1 | tee -a "$LOGFILE"
+$PY -c "import torch_harmonics; print('torch_harmonics OK')" 2>&1 | tee -a "$LOGFILE"
+
+# train (original lr=1e-2, 100 epochs)
+$PY train.py \
+  --config config_paradis.yaml \
+  --experiment.name paradis_dt50_with_wind_learning \
+  --training.save_dir trial \
+  --training.pretrain_epochs 100 \
+  --training.finetune_epochs 0 \
+  --data.dt_solver 50 2>&1 | tee -a "$LOGFILE"
+
+echo "DONE: $(date)" | tee -a "$LOGFILE"
