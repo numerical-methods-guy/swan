@@ -1,0 +1,117 @@
+#!/bin/bash
+#PBS -N paradis_gbell_train_gbell_val_all_channel_11march_williamson6_bsize_15e-4
+#PBS -q gpu
+#PBS -l select=1:ncpus=12:mpiprocs=1:ngpus=1:mem=109G
+#PBS -l walltime=12:00:00
+#PBS -j n
+#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/williamson6_11march_paradis_gbell_all_channel_bsize_15e-4.out
+#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/williamson6_11march_paradis_gbell_all_channel_bsize_15e-4.err
+
+# IMPORTANT: do NOT use -e (we want "no fail")
+set -u -o pipefail
+
+REPO="/space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan"
+PY="/home/csu001/data/ppp5/conda_env/paradis/bin/python"
+
+mkdir -p "$REPO/err_out/out" "$REPO/err_out/err"
+cd "$REPO"
+
+echo "HOST: $(hostname)"
+echo "CWD:  $(pwd)"
+echo "PY:   $PY"
+echo "TIME: $(date)"
+echo "GPU:"
+nvidia-smi || true
+
+# =========================
+# FIXED SETTINGS
+# =========================
+MODEL="paradis"
+CONFIG="config_paradis.yaml"
+SAVE_DIR="trial11_11march"
+
+# Script to run
+PY_SCRIPT="avi_train_gbell_train_gbell_val_6_all_channel.py"
+
+# Data / solver
+DT_SOLVER=25
+NTRAIN=4096          #1024
+NVAL=128
+SEED=42
+PTEP=75
+FTEP=0
+BSIZE=16
+
+
+# Architecture (should match init checkpoint)
+HD=48
+L=8
+ENC=3
+VEL=12
+DIFF=24
+REACT=12
+BIAS=3
+LRATE=0.00015
+
+
+# Init checkpoint (weights-only init)
+#INIT_CKPT="trial2_24feb/paradis_dt25_train1024_rollloss_b3_r7_pt0_hd48_L8_enc3_vel12_diff24_react12_bias3_ft75_lr0.00005_seed42_24feb_rolloutloss/version_0/checkpoints/rolloutloss-epoch=17-val_loss=0.0115.ckpt"
+
+EXP_NAME="${MODEL}_gbell_train_gbell_val_all_channel_dt${DT_SOLVER}_train${NTRAIN}_val${NVAL}_pretrain${PTEP}_hd${HD}_L${L}_enc${ENC}_vel${VEL}_diff${DIFF}_react${REACT}_bias${BIAS}_seed${SEED}_lr${LRATE}_Batchsize${BSIZE}_11march_williamson6_BSIZE_15e-5"
+
+LOG_DIR="$REPO/$SAVE_DIR/pbs_logs_11march_batchsize_15e-5"
+mkdir -p "$REPO/$SAVE_DIR" "$LOG_DIR"
+
+LOG_FILE="$LOG_DIR/${EXP_NAME}.log"
+FAIL_SUMMARY="$LOG_DIR/failures_${EXP_NAME}_$(date +%Y%m%d_%H%M%S)_11march_williamson6_batchsize_15e-5.txt"
+: > "$FAIL_SUMMARY"
+
+echo "============================================================" | tee "$LOG_FILE"
+echo "START: $(date)" | tee -a "$LOG_FILE"
+echo "MODEL: $MODEL" | tee -a "$LOG_FILE"
+echo "SCRIPT: $PY_SCRIPT" | tee -a "$LOG_FILE"
+echo "CONFIG: $CONFIG" | tee -a "$LOG_FILE"
+echo "EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+echo "SAVE_DIR: $SAVE_DIR" | tee -a "$LOG_FILE"
+echo "dt_solver=$DT_SOLVER  ntrain=$NTRAIN  nval=$NVAL  seed=$SEED" | tee -a "$LOG_FILE"
+echo "ARCH: hd=$HD L=$L enc=$ENC vel=$VEL diff=$DIFF react=$REACT bias=$BIAS" | tee -a "$LOG_FILE"
+echo "init_ckpt=$INIT_CKPT" | tee -a "$LOG_FILE"
+echo "============================================================" | tee -a "$LOG_FILE"
+
+# Run (GPU0 of allocation)
+CUDA_VISIBLE_DEVICES=2 $PY $PY_SCRIPT \
+  --config "$CONFIG" \
+  --experiment.name "$EXP_NAME" \
+  --experiment.seed "$SEED" \
+  --training.save_dir "$SAVE_DIR" \
+  --data.dt_solver "$DT_SOLVER" \
+  --data.num_train_examples "$NTRAIN" \
+  --data.num_val_examples "$NVAL" \
+  --model.paradis.hidden_dim "$HD" \
+  --model.paradis.num_layers "$L" \
+  --model.paradis.num_encoder_layers "$ENC" \
+  --model.paradis.num_vels "$VEL" \
+  --model.paradis.diffusion_size "$DIFF" \
+  --model.paradis.reaction_size "$REACT" \
+  --model.paradis.bias_channels "$BIAS" \
+  --model.pretrain_epochs "$PTEP" \
+  --training.learning_rate "$LRATE" \
+  --data.batch_size "$BSIZE" \
+  >> "$LOG_FILE" 2>&1
+
+RC=$?
+
+if [[ $RC -ne 0 ]]; then
+  echo "[FAIL] $(date) rc=$RC EXP=$EXP_NAME" | tee -a "$LOG_FILE" >> "$FAIL_SUMMARY"
+  echo "Command failed, but PBS job will exit cleanly." | tee -a "$LOG_FILE"
+else
+  echo "[OK]   $(date) rc=0 EXP=$EXP_NAME" | tee -a "$LOG_FILE"
+fi
+
+echo "============================================================" | tee -a "$LOG_FILE"
+echo "DONE: $(date)  EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+echo "Log:  $LOG_FILE" | tee -a "$LOG_FILE"
+echo "Fail summary: $FAIL_SUMMARY" | tee -a "$LOG_FILE"
+echo "============================================================" | tee -a "$LOG_FILE"
+
+exit 0

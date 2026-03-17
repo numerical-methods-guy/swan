@@ -1,0 +1,140 @@
+#!/bin/bash
+#PBS -N paradis_rolloutloss_b10_r18_w6_b32_nw1_16march
+#PBS -q gpu
+#PBS -l select=1:ncpus=12:mpiprocs=1:ngpus=1:mem=109G
+#PBS -l walltime=12:00:00
+#PBS -j n
+#PBS -o /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/out/williamson6_16march_paradis_rolloutloss_b10_r18_b32_nw1.out
+#PBS -e /space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan/err_out/err/williamson6_16march_paradis_rolloutloss_b10_r18_b32_nw1.err
+
+set -u -o pipefail
+
+REPO="/space/hall5/sitestore/eccc/mrd/rpnatm/avg000/Toy_Dataset_Shallow_Water/swan"
+PY="/home/csu001/data/ppp5/conda_env/paradis/bin/python"
+
+mkdir -p "$REPO/err_out/out" "$REPO/err_out/err"
+cd "$REPO"
+
+echo "HOST: $(hostname)"
+echo "CWD:  $(pwd)"
+echo "PY:   $PY"
+echo "TIME: $(date)"
+echo "GPU:"
+nvidia-smi || true
+
+# =========================
+# FIXED SETTINGS
+# =========================
+MODEL="paradis"
+CONFIG="config_paradis.yaml"
+SAVE_DIR="trial16_16march"
+
+PY_SCRIPT="avi_train_rollout_loss_burnin_all_channel_randomic200_predwinds_nockpt_callback.py"
+
+# Data / solver
+DT_SOLVER=20
+NTRAIN=1024
+NVAL=64
+SEED=46
+FTEP=100
+BSIZE=10
+NWORK=0
+BURN_IN=1
+N_ROLLOUT=5
+
+# Architecture
+HD=48
+L=8
+ENC=3
+VEL=6
+DIFF=24
+REACT=12
+BIAS=3
+LRATE=0.000062
+INIT_CKPT="trial3_3march/paradis_gbell_train_gbell_val_all_channel_dt25_train1024_hd48_L8_enc3_vel6_diff24_react12_bias3_seed42_lr0.003_3march/version_0/checkpoints/pretrain-epoch=96-val_loss=0.0001.ckpt"
+
+
+
+EXP_NAME="${MODEL}_rolloutloss_burnin_dt${DT_SOLVER}_train${NTRAIN}_val${NVAL}_finetune${FTEP}_hd${HD}_L${L}_enc${ENC}_vel${VEL}_diff${DIFF}_react${REACT}_bias${BIAS}_seed${SEED}_lr${LRATE}_Batchsize${BSIZE}_NumWorkers${NWORK}_burnin${BURN_IN}_rollout${N_ROLLOUT}_16march_williamson6_BSIZE_gpu_monitor_num_workers"
+
+LOG_DIR="$REPO/$SAVE_DIR/pbs_logs_16march_batchsize_gpu_monitor_num_workers"
+mkdir -p "$REPO/$SAVE_DIR" "$LOG_DIR"
+
+LOG_FILE="$LOG_DIR/${EXP_NAME}.log"
+GPU_MONITOR_LOG="$LOG_DIR/${EXP_NAME}_gpu_monitor_num_workers.log"
+FAIL_SUMMARY="$LOG_DIR/failures_${EXP_NAME}_$(date +%Y%m%d_%H%M%S)_16march_williamson6_batchsize_gpu_monitor_num_workers.txt"
+: > "$FAIL_SUMMARY"
+: > "$GPU_MONITOR_LOG"
+
+echo "============================================================" | tee "$LOG_FILE"
+echo "START: $(date)" | tee -a "$LOG_FILE"
+echo "MODEL: $MODEL" | tee -a "$LOG_FILE"
+echo "SCRIPT: $PY_SCRIPT" | tee -a "$LOG_FILE"
+echo "CONFIG: $CONFIG" | tee -a "$LOG_FILE"
+echo "EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+echo "SAVE_DIR: $SAVE_DIR" | tee -a "$LOG_FILE"
+echo "dt_solver=$DT_SOLVER  ntrain=$NTRAIN  nval=$NVAL  seed=$SEED" | tee -a "$LOG_FILE"
+echo "ARCH: hd=$HD L=$L enc=$ENC vel=$VEL diff=$DIFF react=$REACT bias=$BIAS" | tee -a "$LOG_FILE"
+echo "finetune_epochs=$FTEP  finetune_lr=$LRATE  burn_in=$BURN_IN  n_rollout=$N_ROLLOUT" | tee -a "$LOG_FILE"
+echo "============================================================" | tee -a "$LOG_FILE"
+
+log_gpu_usage() {
+  while true; do
+    echo "============================================================" | tee -a "$GPU_MONITOR_LOG" >> "$LOG_FILE"
+    echo "GPU SNAPSHOT TIME: $(date)" | tee -a "$GPU_MONITOR_LOG" >> "$LOG_FILE"
+    nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu,utilization.memory \
+      --format=csv,noheader,nounits | tee -a "$GPU_MONITOR_LOG" >> "$LOG_FILE" || true
+    echo "" | tee -a "$GPU_MONITOR_LOG" >> "$LOG_FILE"
+    sleep 30
+  done
+}
+
+log_gpu_usage &
+GPU_MONITOR_PID=$!
+echo "Started GPU monitor with PID $GPU_MONITOR_PID" | tee -a "$LOG_FILE"
+echo "GPU monitor log: $GPU_MONITOR_LOG" | tee -a "$LOG_FILE"
+
+CUDA_VISIBLE_DEVICES=1 $PY $PY_SCRIPT \
+  --config "$CONFIG" \
+  --experiment.name "$EXP_NAME" \
+  --experiment.seed "$SEED" \
+  --training.save_dir "$SAVE_DIR" \
+  --data.dt_solver "$DT_SOLVER" \
+  --data.num_train_examples "$NTRAIN" \
+  --data.num_val_examples "$NVAL" \
+  --model.paradis.hidden_dim "$HD" \
+  --model.paradis.num_layers "$L" \
+  --model.paradis.num_encoder_layers "$ENC" \
+  --model.paradis.num_vels "$VEL" \
+  --model.paradis.diffusion_size "$DIFF" \
+  --model.paradis.reaction_size "$REACT" \
+  --model.paradis.bias_channels "$BIAS" \
+  --training.finetune_epochs "$FTEP" \
+  --training.finetune_learning_rate "$LRATE" \
+  --data.batch_size "$BSIZE" \
+  --data.num_workers "$NWORK" \
+  --burn_in "$BURN_IN" \
+  --n_rollout "$N_ROLLOUT" \
+  --pretrain_ckpt "$INIT_CKPT" \
+  >> "$LOG_FILE" 2>&1
+
+RC=$?
+
+kill "$GPU_MONITOR_PID" 2>/dev/null || true
+wait "$GPU_MONITOR_PID" 2>/dev/null || true
+echo "Stopped GPU monitor PID $GPU_MONITOR_PID" | tee -a "$LOG_FILE"
+
+if [[ $RC -ne 0 ]]; then
+  echo "[FAIL] $(date) rc=$RC EXP=$EXP_NAME" | tee -a "$LOG_FILE" >> "$FAIL_SUMMARY"
+  echo "Command failed, but PBS job will exit cleanly." | tee -a "$LOG_FILE"
+else
+  echo "[OK]   $(date) rc=0 EXP=$EXP_NAME" | tee -a "$LOG_FILE"
+fi
+
+echo "============================================================" | tee -a "$LOG_FILE"
+echo "DONE: $(date)  EXP: $EXP_NAME" | tee -a "$LOG_FILE"
+echo "Log:  $LOG_FILE" | tee -a "$LOG_FILE"
+echo "Fail summary: $FAIL_SUMMARY" | tee -a "$LOG_FILE"
+echo "============================================================" | tee -a "$LOG_FILE"
+
+exit 0
