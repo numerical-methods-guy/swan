@@ -5,8 +5,8 @@ import math
 import torch
 from torch import nn
 
-from paradis.advection import NeuralSemiLagrangian
-from paradis.blocks import GMBlock
+from model.advection import NeuralSemiLagrangian
+from model.blocks import GMBlock
 
 
 def get_scaled_timestep(original_timestep_seconds: float) -> float:

@@ -10,7 +10,7 @@ data:
   dt_solver: 150        # Time step for the underlying solver
   batch_size: 4
   num_workers: 0        # Set to 0 if dataset generation issues occur
-  grid: "equiangular"  # PARADIS requires equiangular grid
+  grid: "equiangular"   # PARADIS requires equiangular grid
   num_train_examples: 512
   num_val_examples: 64
 
@@ -24,7 +24,7 @@ model:
     reaction_size: 7    # Hidden dimension for reaction operator
     base_dt: 1800       # Base time step (same as data.dt)
     interpolation: "bicubic"  # Interpolation method: "bilinear" or "bicubic"
-    bias_channels: 2     # Number of learned bias channels
+    bias_channels: 2    # Number of learned bias channels
 
 training:
   learning_rate: 1.0e-3
@@ -35,3 +35,7 @@ training:
   amp_mode: "none"      # Options: "none", "fp16", "bf16"
   log_every_n_steps: 10
   save_dir: "./logs"
+  # Deterministic LR schedule: decay by lr_gamma at each milestone epoch.
+  # Remove these two keys to fall back to ReduceLROnPlateau.
+  lr_milestones: [50, 75, 90]
+  lr_gamma: 0.5

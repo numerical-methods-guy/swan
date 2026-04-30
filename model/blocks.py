@@ -6,7 +6,7 @@ from typing import Union, Type, Tuple
 import torch
 from torch import nn
 
-from paradis.padding import GeoCyclicPadding
+from model.padding import GeoCyclicPadding
 
 """
     simple_blocks: Wrapper file to consolidate simple NN layers, defined as those that do

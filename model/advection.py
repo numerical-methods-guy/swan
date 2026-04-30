@@ -1,7 +1,7 @@
 import torch
 
-from paradis.blocks import GMBlock
-from paradis.padding import GeoCyclicPadding
+from model.blocks import GMBlock
+from model.padding import GeoCyclicPadding
 
 
 class NeuralSemiLagrangian(torch.nn.Module):
