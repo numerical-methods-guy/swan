@@ -6,7 +6,7 @@ experiment:
 data:
   nlat: 128
   nlon: 256
-  dt: 1800              # Time step for the model (30 mins)
+  dt: 900               # Time step for the model (60 mins)
   dt_solver: 150        # Time step for the underlying solver
   batch_size: 4
   num_workers: 0        # Set to 0 if dataset generation issues occur
@@ -16,26 +16,26 @@ data:
 
 model:
   paradis:
-    hidden_dim: 16      # Latent space dimension
+    hidden_dim: 32      # Latent space dimension
     num_layers: 4       # Number of ADR (Advection-Diffusion-Reaction) layers
     num_encoder_layers: 1  # Number of layers in input projection
     num_vels: 6         # Number of velocity channels
-    diffusion_size: 10  # Hidden dimension for diffusion operator
-    reaction_size: 7    # Hidden dimension for reaction operator
-    base_dt: 1800       # Base time step (same as data.dt)
+    diffusion_size: 16  # Hidden dimension for diffusion operator
+    reaction_size: 16    # Hidden dimension for reaction operator
+    base_dt: 900         # Base time step (same as data.dt)
     interpolation: "bicubic"  # Interpolation method: "bilinear" or "bicubic"
     bias_channels: 2    # Number of learned bias channels
 
 training:
   learning_rate: 1.0e-3
   finetune_learning_rate: 1.0e-4
-  pretrain_epochs: 100
-  finetune_epochs: 0
+  pretrain_epochs: 20
+  finetune_epochs: 10
   nfuture: 1
   amp_mode: "none"      # Options: "none", "fp16", "bf16"
   log_every_n_steps: 10
   save_dir: "./logs"
   # Deterministic LR schedule: decay by lr_gamma at each milestone epoch.
   # Remove these two keys to fall back to ReduceLROnPlateau.
-  lr_milestones: [50, 75, 90]
+  lr_milestones: [10, 16]
   lr_gamma: 0.5
