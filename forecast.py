@@ -152,7 +152,7 @@ def plot_energy_spectra(pred_spectra, truth_spectra, step, output_path, model_na
         ax.set_ylabel("Power Spectrum", fontsize=11)
         ax.set_title(f"{title} (t={step})", fontsize=12, fontweight="bold")
         ax.grid(True, alpha=0.3, which="both")
-        ax.legend(loc="lower left", fontsize=9)
+        ax.legend(loc="upper left", fontsize=9)
         ax.set_xlim([1, k_plot[-1]])
 
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -169,6 +169,22 @@ def _move_dataset_to_device(dataset, device):
     dataset.wind_var = dataset.wind_var.to(device)
 
 
+def _get_ic(solver, ic_type, mach=0.2):
+    """Return a spectral initial condition from the solver.
+
+    Args:
+        solver: ShallowWaterSolver instance.
+        ic_type: ``"random"`` or ``"galewsky"``.
+        mach: Mach number passed to random_initial_condition (ignored for galewsky).
+    """
+    if ic_type == "random":
+        return solver.random_initial_condition(mach=mach)
+    elif ic_type == "galewsky":
+        return solver.galewsky_initial_condition()
+    else:
+        raise ValueError(f"Unknown ic_type '{ic_type}'. Expected 'random' or 'galewsky'.")
+
+
 def _run_single_ic_inference(
     model,
     dataset,
@@ -177,6 +193,7 @@ def _run_single_ic_inference(
     nsteps,
     autoreg_steps,
     device,
+    ic_type="random",
     output_dir=None,
     ic_index=None,
     plot_channel=0,
@@ -184,7 +201,7 @@ def _run_single_ic_inference(
     spectral_analysis=True,
     model_name="Model",
 ):
-    """Run one autoregressive rollout from a single random initial condition.
+    """Run one autoregressive rollout from a single initial condition.
 
     The ML model and the reference numerical solver are each timed over the
     full rollout horizon independently, with CUDA synchronization guards on GPU
@@ -199,6 +216,7 @@ def _run_single_ic_inference(
         nsteps: Number of solver substeps per model timestep.
         autoreg_steps: Number of autoregressive steps to roll out.
         device: Torch device.
+        ic_type: Initial condition type — ``"random"`` (mach=0.2) or ``"galewsky"``.
         output_dir: If provided, tensors/plots/spectra are saved here.
         ic_index: IC index used as a filename prefix when output_dir is set.
         plot_channel: Field channel to visualise (0=h, 1=vorticity, 2=divergence).
@@ -220,7 +238,7 @@ def _run_single_ic_inference(
     wind_var = dataset.wind_var
 
     # --- Timing pass: ML model ---
-    ic = dataset.solver.random_initial_condition(mach=0.2)
+    ic = _get_ic(dataset.solver, ic_type)
 
     prd_fields = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
     prd_fields = prd_fields.unsqueeze(0)
@@ -259,7 +277,7 @@ def _run_single_ic_inference(
     solver_time = time.perf_counter() - solver_start
 
     # --- Metrics and output pass ---
-    ic = dataset.solver.random_initial_condition(mach=0.2)
+    ic = _get_ic(dataset.solver, ic_type)
     uspec = ic.clone()
 
     prd_fields = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
@@ -398,16 +416,20 @@ def autoregressive_inference(
     model_name="Model",
     autoreg_steps=10,
     num_ics=1,
+    ic_type="random",
     plot_channel=0,
     save_plots=True,
     spectral_analysis=True,
     device=torch.device("cpu"),
 ):
-    """Perform autoregressive inference over one or more random initial conditions.
+    """Perform autoregressive inference over one or more initial conditions.
 
     Plots, tensors, and spectral analyses are written only for the first IC to
     avoid excessive disk usage. Per-IC timing is printed to stdout and aggregated
     in the returned summary.
+
+    For the Galewsky test case (``ic_type="galewsky"``) the solver has a single
+    deterministic IC, so ``num_ics`` is forced to 1.
 
     Args:
         model: The PARADIS LightningModule.
@@ -418,7 +440,8 @@ def autoregressive_inference(
         nsteps: Number of solver substeps per model timestep.
         model_name: Label used in plot titles.
         autoreg_steps: Number of autoregressive steps per rollout.
-        num_ics: Number of random initial conditions to average over.
+        num_ics: Number of initial conditions to average over (forced to 1 for galewsky).
+        ic_type: ``"random"`` or ``"galewsky"``.
         plot_channel: Field channel to visualise.
         save_plots: Whether to save comparison plots.
         spectral_analysis: Whether to save spectral energy plots.
@@ -432,11 +455,14 @@ def autoregressive_inference(
     _move_dataset_to_device(dataset, device)
     os.makedirs(output_dir, exist_ok=True)
 
+    if ic_type == "galewsky":
+        num_ics = 1
+
     all_step_metrics = []
     all_ml_times = []
     all_solver_times = []
 
-    print(f"Starting Autoregressive Inference ({autoreg_steps} steps, {num_ics} IC(s))...")
+    print(f"Starting Autoregressive Inference ({autoreg_steps} steps, {num_ics} IC(s), ic_type={ic_type})...")
 
     with torch.no_grad():
         for ic_idx in range(num_ics):
@@ -449,6 +475,7 @@ def autoregressive_inference(
                 nsteps=nsteps,
                 autoreg_steps=autoreg_steps,
                 device=device,
+                ic_type=ic_type,
                 output_dir=output_dir if ic_idx == 0 else None,
                 ic_index=ic_idx,
                 plot_channel=plot_channel,
@@ -477,7 +504,9 @@ def main():
     parser.add_argument("--output_dir", type=str, default="./results", help="Directory to save results")
     parser.add_argument("--autoreg_steps", type=int, default=10, help="Number of autoregressive steps")
     parser.add_argument("--num_ics", type=int, default=1,
-                        help="Number of random initial conditions to average over")
+                        help="Number of initial conditions to average over (ignored for galewsky)")
+    parser.add_argument("--ic_type", type=str, default="random", choices=["random", "galewsky"],
+                        help="Initial condition type: random (mach=0.2) or galewsky barotropic jet")
     parser.add_argument("--plot_channel", type=int, default=0,
                         help="Channel to plot (0=Geopotential, 1=Vorticity, 2=Divergence)")
     parser.add_argument("--device", type=str, default=None, help="Device to use (cuda/cpu)")
@@ -504,7 +533,8 @@ def main():
     print(f"Checkpoint:          {args.checkpoint}")
     print(f"Device:              {device}")
     print(f"Autoregressive steps:{args.autoreg_steps}")
-    print(f"Initial conditions:  {args.num_ics}")
+    print(f"IC type:             {args.ic_type}")
+    print(f"Initial conditions:  {args.num_ics if args.ic_type == 'random' else 1}")
     print(f"Output directory:    {args.output_dir}")
     print(f"Save plots:          {not args.no_plots}")
     print(f"Spectral analysis:   {args.spectral_analysis}")
@@ -531,7 +561,6 @@ def main():
         dt=dt,
         nsteps=nsteps,
         dims=(config["data"]["nlat"], config["data"]["nlon"]),
-        grid=config["data"]["grid"],
         normalize=True,
         device=device,
     )
@@ -553,6 +582,7 @@ def main():
         model_name="PARADIS",
         autoreg_steps=args.autoreg_steps,
         num_ics=args.num_ics,
+        ic_type=args.ic_type,
         plot_channel=args.plot_channel,
         save_plots=(not args.no_plots),
         spectral_analysis=args.spectral_analysis,

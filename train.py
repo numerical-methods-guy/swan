@@ -9,7 +9,6 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
-from torch_harmonics import RealSHT
 from torch_harmonics.examples.losses import (
     SquaredL2LossS2,
     L1LossS2,
@@ -164,19 +163,18 @@ def create_datasets(config, device):
     nsteps = dt // config["data"]["dt_solver"]
     nlat = config["data"]["nlat"]
     nlon = config["data"]["nlon"]
-    grid = config["data"]["grid"]
 
     train_dataset = PdeDatasetWithWinds(
-        dt=dt, nsteps=nsteps, dims=(nlat, nlon), grid=grid, normalize=True, device=device,
+        dt=dt, nsteps=nsteps, dims=(nlat, nlon), normalize=True, device=device,
     )
-    train_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
+    train_dataset.sht = train_dataset.solver.sht
     train_dataset.set_initial_condition("random")
     train_dataset.set_num_examples(config["data"]["num_train_examples"])
 
     val_dataset = PdeDatasetWithWinds(
-        dt=dt, nsteps=nsteps, dims=(nlat, nlon), grid=grid, normalize=True, device=device,
+        dt=dt, nsteps=nsteps, dims=(nlat, nlon), normalize=True, device=device,
     )
-    val_dataset.sht = RealSHT(nlat=nlat, nlon=nlon, grid=grid).to(device)
+    val_dataset.sht = val_dataset.solver.sht
     val_dataset.set_initial_condition("random")
     val_dataset.set_num_examples(config["data"]["num_val_examples"])
 

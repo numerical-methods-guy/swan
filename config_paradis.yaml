@@ -27,11 +27,11 @@ model:
     bias_channels: 2    # Number of learned bias channels
 
 training:
-  learning_rate: 1.0e-3
-  finetune_learning_rate: 1.0e-4
+  learning_rate: 1.0e-2
+  finetune_learning_rate: 1.0e-3
   pretrain_epochs: 20
   finetune_epochs: 10
-  nfuture: 1
+  nfuture: 4
   amp_mode: "none"      # Options: "none", "fp16", "bf16"
   log_every_n_steps: 10
   save_dir: "./logs"
