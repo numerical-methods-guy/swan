@@ -1,19 +1,36 @@
-"""Paradis neural architecture."""
+"""Paradis neural architecture adapted for shallow water equations."""
 
-import math
+from torch.utils.checkpoint import checkpoint
 
 import torch
 from torch import nn
+import torch.nn.functional as F
+
 
 from model.advection import NeuralSemiLagrangian
-from model.blocks import GMBlock
+from model.blocks import GMBlock, PhysicalDownsample, SepConv
+from model.padding import GeoCyclicPadding
 
 
 def get_scaled_timestep(original_timestep_seconds: float) -> float:
     return original_timestep_seconds * 7.29212e-5
 
 
-class ParadisModel(nn.Module):
+_ACTIVATIONS = {
+    "SiLU": nn.SiLU,
+    "GELU": nn.GELU,
+}
+
+
+def _get_activation_cls(name: str) -> type[nn.Module]:
+    if name not in _ACTIVATIONS:
+        raise ValueError(
+            f"Unknown activation_fn '{name}'. Allowed: {list(_ACTIVATIONS.keys())}"
+        )
+    return _ACTIVATIONS[name]
+
+
+class Paradis(nn.Module):
     """Paradis model adapted for shallow water equations."""
 
     def __init__(self, config):
@@ -21,7 +38,8 @@ class ParadisModel(nn.Module):
 
         self.nlat = config["data"]["nlat"]
         self.nlon = config["data"]["nlon"]
-        self.grid = config["data"]["grid"]
+
+        self.grid = "equiangular"
 
         if self.grid != "equiangular":
             raise ValueError(
@@ -31,74 +49,101 @@ class ParadisModel(nn.Module):
 
         mesh_size = (self.nlat, self.nlon)
 
-        model_config = config["model"]["paradis"]
+        model_config = config["model"]["paradis"]  # SWAN
 
         hidden_dim = model_config["hidden_dim"]
+
         self.num_vels = model_config["num_vels"]
-        diffusion_size = model_config["diffusion_size"]
-        reaction_size = model_config["reaction_size"]
 
         adv_interpolation = model_config["interpolation"]
         bias_channels = model_config.get("bias_channels", 4)
-        num_encoder_layers = model_config.get("num_encoder_layers", 1)
 
-        self.num_layers = model_config["num_layers"]
+        self.num_layers = max(1, model_config["num_layers"])
         self.dt = get_scaled_timestep(model_config["base_dt"]) / self.num_layers
 
-        # Create lat/lon grid
-        dlat = 180.0 / (self.nlat - 1)
-        dlon = 360.0 / self.nlon
+        # Input projection
+        self.activation_function = _get_activation_cls(
+            model_config.get("activation", "SiLU")
+        )
 
+        input_dim = 5
+
+        # Wrapper for gradient checkpointing
+        self.step_fn = self._layer_step
+        self.gradient_checkpoint = config.get("training", {}).get(
+            "gradient_checkpointing", False
+        )
+
+        self.downsample_diffusion = False
+
+        if self.gradient_checkpoint:
+            self.step_fn = lambda i, h: checkpoint(
+                self._layer_step, i, h, use_reentrant=False
+            )
+
+        physblock = model_config.get("physblock", {})
+
+        input_layers = physblock.get("input_proj", {}).get(
+            "layers", ["SepConv", "CLinear"]
+        )
+        vnet_layers = physblock.get("velocity_net", {}).get("layers", ["SepConv"])
+        diffusion_layers = physblock.get("diffusion", {}).get("layers", ["SepConv"])
+        reaction_layers = physblock.get("reaction", {}).get(
+            "layers", ["CLinear", "CLinear"]
+        )
+        output_layers = physblock.get("output_proj", {}).get(
+            "layers", ["SepConv", "CLinear"]
+        )
+
+        input_ldim = physblock.get("input_proj", {}).get("hidden_dim", hidden_dim)
+        vnet_ldim = physblock.get("velocity_net", {}).get("hidden_dim", hidden_dim)
+        diff_ldim = physblock.get("diffusion", {}).get(
+            "hidden_dim", model_config.get("diffusion_size", hidden_dim)
+        )
+        reac_ldim = physblock.get("reaction", {}).get(
+            "hidden_dim", model_config.get("reaction_size", hidden_dim)
+        )
+        output_ldim = physblock.get("output_proj", {}).get("hidden_dim", hidden_dim)
+
+        adv_block = physblock.get("advection", {})
+        down_proj_layers = adv_block.get("down_projection", {}).get(
+            "layers", ["CLinear"]
+        )
+        up_proj_layers = adv_block.get("up_projection", {}).get("layers", ["SepConv"])
+        down_proj_ldim = adv_block.get("down_projection", {}).get("hidden_dim", 0)
+        up_proj_ldim = adv_block.get("up_projection", {}).get("hidden_dim", 0)
+
+        mesh_size_coarse = mesh_size
+
+        dlon = 360.0 / self.nlon
         lat = torch.linspace(-90, 90, self.nlat, dtype=torch.float32)
         lon = torch.linspace(0, 360 - dlon, self.nlon, dtype=torch.float32)
-
         lat_grid, lon_grid = torch.meshgrid(lat, lon, indexing="ij")
         lat_grid = torch.deg2rad(lat_grid)
         lon_grid = torch.deg2rad(lon_grid)
 
-        # Input projection
-        self.activation_function = nn.SiLU
-
-        # Input: 5 channels (3 fields + 2 winds)
-        input_dim = 5
-        current_dim = input_dim
-        encoder_layers = []
-        bias = False
-        
-        for l in range(num_encoder_layers - 1):
-            fc = nn.Conv2d(current_dim, hidden_dim, 1, bias=True)
-
-            # Initialize the weights correctly
-            scale = math.sqrt(2.0 / current_dim)
-            nn.init.normal_(fc.weight, mean=0.0, std=scale)
-
-            if fc.bias is not None:
-                nn.init.constant_(fc.bias, 0.0)
-
-            encoder_layers.append(fc)
-            encoder_layers.append(self.activation_function())
-
-            current_dim = hidden_dim
-
-        fc = nn.Conv2d(current_dim, hidden_dim, 1, bias=bias)
-        scale = math.sqrt(1.0 / current_dim)
-        nn.init.normal_(fc.weight, mean=0.0, std=scale)
-        if fc.bias is not None:
-            nn.init.constant_(fc.bias, 0.0)
-        encoder_layers.append(fc)
-
-        self.input_proj = nn.Sequential(*encoder_layers)
+        self.input_proj = GMBlock(
+            layers=input_layers,
+            input_dim=input_dim,
+            output_dim=hidden_dim,
+            hidden_dim=input_ldim,
+            mesh_size=mesh_size,
+            activation=True,
+            activation_fn=self.activation_function,
+            pre_normalize=False,
+            bias_channels=0,
+        )
 
         self.velocity_nets = nn.ModuleList(
             [
                 GMBlock(
-                    layers=["SepConv"],
+                    layers=vnet_layers,
                     input_dim=hidden_dim,
                     output_dim=2 * self.num_vels,
-                    hidden_dim=hidden_dim,
-                    kernel_size=3,
+                    hidden_dim=vnet_ldim,
                     mesh_size=mesh_size,
                     bias_channels=bias_channels,
+                    activation_fn=self.activation_function,
                     pre_normalize=True,
                 )
                 for _ in range(self.num_layers)
@@ -114,7 +159,10 @@ class ParadisModel(nn.Module):
                     lat_grid=lat_grid,
                     lon_grid=lon_grid,
                     interpolation=adv_interpolation,
-                    project_advection=model_config.get("projected_advection", True),
+                    down_proj_layers=down_proj_layers,
+                    up_proj_layers=up_proj_layers,
+                    down_proj_ldim=down_proj_ldim,
+                    up_proj_ldim=up_proj_ldim,
                 )
                 for _ in range(self.num_layers)
             ]
@@ -123,12 +171,13 @@ class ParadisModel(nn.Module):
         self.diffusion = nn.ModuleList(
             [
                 GMBlock(
-                    layers=["SepConv"],
+                    layers=diffusion_layers,
                     input_dim=hidden_dim,
                     output_dim=hidden_dim,
-                    hidden_dim=diffusion_size,
-                    mesh_size=mesh_size,
+                    hidden_dim=diff_ldim,
+                    mesh_size=mesh_size_coarse,
                     pre_normalize=True,
+                    activation_fn=self.activation_function,
                     bias_channels=bias_channels,
                 )
                 for _ in range(self.num_layers)
@@ -138,13 +187,13 @@ class ParadisModel(nn.Module):
         self.reaction = nn.ModuleList(
             [
                 GMBlock(
-                    layers=["CLinear"] * 2,
+                    layers=reaction_layers,
                     input_dim=hidden_dim,
                     output_dim=hidden_dim,
-                    hidden_dim=reaction_size,
-                    kernel_size=1,
+                    hidden_dim=reac_ldim,
                     mesh_size=mesh_size,
                     pre_normalize=True,
+                    activation_fn=self.activation_function,
                     bias_channels=bias_channels,
                 )
                 for _ in range(self.num_layers)
@@ -152,58 +201,62 @@ class ParadisModel(nn.Module):
         )
 
         self.output_proj = GMBlock(
-            layers=["SepConv", "CLinear"],
+            layers=output_layers,
             input_dim=hidden_dim,
             output_dim=3,
-            hidden_dim=hidden_dim,
+            hidden_dim=output_ldim,
             mesh_size=mesh_size,
-            kernel_size=3,
             activation=False,
+            activation_fn=self.activation_function,
             bias_channels=bias_channels,
         )
 
+        self.alpha_adv = nn.Parameter(torch.full((self.num_layers, hidden_dim), -1.0))
+
+        self.downsample = lambda x: x
+        self.upsample = lambda x: x
+
+    def _apply_checkpoint(self, func, *args):
+        if self.gradient_checkpoint:
+            return checkpoint(func, *args, use_reentrant=False)
+        else:
+            return func(*args)
+
+    def _diffusion(self, i: int, z: torch.Tensor) -> torch.Tensor:
+        return self.upsample(self.diffusion[i](self.downsample(z)))
+
+    def _layer_step(self, i: int, hidden: torch.Tensor) -> torch.Tensor:
+        """Single physics-informed latent update."""
+        B = hidden.shape[0]
+
+        # Predict latent velocities (u, v) for advection
+        velocities_raw = self.velocity_nets[i](hidden)
+        velocities = velocities_raw.view(B, 2, self.num_vels, self.nlat, self.nlon)
+        u, v = velocities[:, 0], velocities[:, 1]
+
+        g_adv = torch.sigmoid(self.alpha_adv[i]).to(hidden.dtype).view(1, -1, 1, 1)
+
+        # Transport: Semi-Lagrangian advection
+        advected = self.advection[i](hidden, u, v, self.dt)
+        hidden = hidden + g_adv * (advected - hidden)
+
+        # Mixing: Learned diffusion
+        hidden = hidden + self._diffusion(i, hidden)
+
+        # Forcing: Pointwise reaction (primary nonlinearity)
+        hidden = hidden + self.reaction[i](hidden)
+
+        return hidden
+
     def forward(self, fields: torch.Tensor, winds: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass with fields and winds.
 
-        Parameters
-        ----------
-        fields : torch.Tensor
-            Input fields of shape (batch, 3, nlat, nlon)
-        winds : torch.Tensor
-            Input winds of shape (batch, 2, nlat, nlon)
-
-        Returns
-        -------
-        torch.Tensor
-            Output fields of shape (batch, 3, nlat, nlon)
-        """
-        # Concatenate fields and winds
         x = torch.cat([fields, winds], dim=1)
-        batch_size = x.shape[0]
 
-        # Project features to latent space
-        hidden = self.input_proj(x)
+        # Encode physical variables to latent space
+        hidden = self._apply_checkpoint(self.input_proj, x)
 
+        # Recurrent integration through physics layers
         for i in range(self.num_layers):
-            velocities_raw = self.velocity_nets[i](hidden)
+            hidden = self.step_fn(i, hidden)
 
-            # Obtain velocities in latent space
-            velocities = velocities_raw.reshape(
-                batch_size, 2, self.num_vels, self.nlat, self.nlon
-            )
-            u = velocities[:, 0]
-            v = velocities[:, 1]
-
-            # Apply SL advection, reaction and diffusion blocks
-            advected = self.advection[i](hidden, u, v, self.dt)
-            hidden = hidden + advected
-
-            diffused = self.diffusion[i](hidden)
-            hidden = hidden + diffused
-
-            reacted = self.reaction[i](hidden)
-            hidden = hidden + reacted
-
-        # Project back to physical space
-        return self.output_proj(hidden)
+        return fields + self._apply_checkpoint(self.output_proj, hidden)

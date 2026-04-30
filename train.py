@@ -16,7 +16,7 @@ from torch_harmonics.examples.losses import (
     W11LossS2,
 )
 
-from model import ParadisModel
+from model.paradis import Paradis
 from pde_dataset_with_winds import PdeDatasetWithWinds
 
 
@@ -72,7 +72,7 @@ class SWELightningModule(pl.LightningModule):
             raise ValueError(
                 "PARADIS model config not found. Add a 'model.paradis' section to your config."
             )
-        self.model = ParadisModel(config)
+        self.model = Paradis(config)
 
         self.loss_fn = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l1 = L1LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
@@ -165,14 +165,22 @@ def create_datasets(config, device):
     nlon = config["data"]["nlon"]
 
     train_dataset = PdeDatasetWithWinds(
-        dt=dt, nsteps=nsteps, dims=(nlat, nlon), normalize=True, device=device,
+        dt=dt,
+        nsteps=nsteps,
+        dims=(nlat, nlon),
+        normalize=True,
+        device=device,
     )
     train_dataset.sht = train_dataset.solver.sht
     train_dataset.set_initial_condition("random")
     train_dataset.set_num_examples(config["data"]["num_train_examples"])
 
     val_dataset = PdeDatasetWithWinds(
-        dt=dt, nsteps=nsteps, dims=(nlat, nlon), normalize=True, device=device,
+        dt=dt,
+        nsteps=nsteps,
+        dims=(nlat, nlon),
+        normalize=True,
+        device=device,
     )
     val_dataset.sht = val_dataset.solver.sht
     val_dataset.set_initial_condition("random")
@@ -183,9 +191,13 @@ def create_datasets(config, device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="config.yaml", help="Path to config file")
     parser.add_argument(
-        "--resume_from", type=str, default=None,
+        "--config", type=str, default="config.yaml", help="Path to config file"
+    )
+    parser.add_argument(
+        "--resume_from",
+        type=str,
+        default=None,
         help="Checkpoint to resume from (for finetuning only)",
     )
 
@@ -235,7 +247,9 @@ def main():
 
     if config["training"]["pretrain_epochs"] > 0 and known_args.resume_from is None:
         print("\n" + "=" * 70)
-        print(f"STARTING PRETRAINING FOR {config['training']['pretrain_epochs']} EPOCHS")
+        print(
+            f"STARTING PRETRAINING FOR {config['training']['pretrain_epochs']} EPOCHS"
+        )
         print("=" * 70 + "\n")
 
         logger = TensorBoardLogger(
@@ -252,7 +266,10 @@ def main():
         trainer = pl.Trainer(
             max_epochs=config["training"]["pretrain_epochs"],
             logger=logger,
-            callbacks=[checkpoint_callback, LearningRateMonitor(logging_interval="epoch")],
+            callbacks=[
+                checkpoint_callback,
+                LearningRateMonitor(logging_interval="epoch"),
+            ],
             accelerator="gpu" if torch.cuda.is_available() else "cpu",
             devices=1,
             precision=precision,
@@ -302,7 +319,10 @@ def main():
         finetune_trainer = pl.Trainer(
             max_epochs=config["training"]["finetune_epochs"],
             logger=finetune_logger,
-            callbacks=[finetune_checkpoint, LearningRateMonitor(logging_interval="epoch")],
+            callbacks=[
+                finetune_checkpoint,
+                LearningRateMonitor(logging_interval="epoch"),
+            ],
             accelerator="gpu" if torch.cuda.is_available() else "cpu",
             devices=1,
             precision=precision,

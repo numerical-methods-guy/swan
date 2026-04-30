@@ -69,9 +69,15 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
 
         wind_samples = torch.stack(wind_samples, dim=0)
 
-        self.wind_mean = torch.mean(wind_samples, dim=(0, 2, 3), keepdim=True).reshape(2, 1, 1)
-        self.wind_var = torch.var(wind_samples, dim=(0, 2, 3), keepdim=True).reshape(2, 1, 1)
-        self.wind_var = torch.maximum(self.wind_var, torch.ones_like(self.wind_var) * 1e-8)
+        self.wind_mean = torch.mean(wind_samples, dim=(0, 2, 3), keepdim=True).reshape(
+            2, 1, 1
+        )
+        self.wind_var = torch.var(wind_samples, dim=(0, 2, 3), keepdim=True).reshape(
+            2, 1, 1
+        )
+        self.wind_var = torch.maximum(
+            self.wind_var, torch.ones_like(self.wind_var) * 1e-8
+        )
 
     def __len__(self):
         return len(self.base_dataset)
@@ -106,7 +112,9 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         """Get a sample with fields and winds."""
         with torch.inference_mode():
             with torch.no_grad():
-                inp_fields, inp_winds, tar_fields, tar_winds = self._get_sample_with_winds()
+                inp_fields, inp_winds, tar_fields, tar_winds = (
+                    self._get_sample_with_winds()
+                )
 
                 if self.normalize:
                     inp_fields = (inp_fields - self.inp_mean) / torch.sqrt(self.inp_var)
