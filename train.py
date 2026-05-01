@@ -18,6 +18,7 @@ from torch_harmonics.examples.losses import (
 
 from model.paradis import Paradis
 from pde_dataset_with_winds import PdeDatasetWithWinds
+from utils.loss import ParadisLoss
 
 
 def load_config(config_path):
@@ -56,6 +57,42 @@ def update_config_from_args(config, unknown_args):
     return config
 
 
+def build_paradis_loss(config):
+    """Construct a ParadisLoss for the shallow water equation setting.
+
+    The SWE model has three output channels (geopotential, vorticity, divergence)
+    with no pressure-level structure, so all variables are treated as surface
+    variables and pressure weighting is effectively bypassed.
+    """
+    nlat = config["data"]["nlat"]
+    loss_cfg = config.get("loss", {})
+
+    loss_function = loss_cfg.get("loss_function", "reversed_huber")
+    delta_loss = loss_cfg.get("delta_loss", 1.0)
+
+    lat_grid = torch.linspace(-90.0, 90.0, nlat, dtype=torch.float32)
+
+    num_features = 3
+    num_surface_vars = 3
+    output_name_order = ["h", "vorticity", "divergence"]
+
+    # Dummy single pressure level so the atmospheric loop is a no-op.
+    pressure_levels = torch.tensor([1000.0], dtype=torch.float32)
+
+    var_loss_weights = torch.ones(num_features, dtype=torch.float32)
+
+    return ParadisLoss(
+        loss_function=loss_function,
+        lat_grid=lat_grid,
+        pressure_levels=pressure_levels,
+        num_features=num_features,
+        num_surface_vars=num_surface_vars,
+        var_loss_weights=var_loss_weights,
+        output_name_order=output_name_order,
+        delta_loss=delta_loss,
+    )
+
+
 class SWELightningModule(pl.LightningModule):
     """Lightning module for the PARADIS shallow water equation model."""
 
@@ -74,7 +111,8 @@ class SWELightningModule(pl.LightningModule):
             )
         self.model = Paradis(config)
 
-        self.loss_fn = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
+        self.loss_fn = build_paradis_loss(config)
+        self.metric_sq_l2 = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l1 = L1LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l2 = L2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_w11 = W11LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
@@ -100,25 +138,18 @@ class SWELightningModule(pl.LightningModule):
             prd = self.model(prd, inp_winds)
         loss = self.loss_fn(prd, tar_fields)
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("val_sq_l2", self.metric_sq_l2(prd, tar_fields), sync_dist=True)
         self.log("val_l1", self.metric_l1(prd, tar_fields), sync_dist=True)
         self.log("val_l2", self.metric_l2(prd, tar_fields), sync_dist=True)
         self.log("val_w11", self.metric_w11(prd, tar_fields), sync_dist=True)
         return loss
 
     def configure_optimizers(self):
-        """Configure Adam with either MultiStepLR or ReduceLROnPlateau.
-
-        MultiStepLR is used when ``training.lr_milestones`` and ``training.lr_gamma``
-        are present in the config, providing a deterministic decay schedule that is
-        more reproducible than plateau-based decay on a regenerated dataset.
-        If those keys are absent, ReduceLROnPlateau is used as a fallback.
-        """
+        """Configure Adam with either MultiStepLR or ReduceLROnPlateau."""
         lr = self.config["training"]["learning_rate"]
         if self.nfuture > 0:
             lr = self.config["training"]["finetune_learning_rate"]
 
-        # foreach=True enables the fused multi-tensor Adam kernel, avoiding
-        # per-parameter Python overhead on the optimizer step.
         optimizer = torch.optim.Adam(self.parameters(), lr=lr, foreach=True)
 
         milestones = self.config["training"].get("lr_milestones", None)
@@ -142,11 +173,7 @@ class SWELightningModule(pl.LightningModule):
             }
 
     def optimizer_zero_grad(self, epoch, batch_idx, optimizer):
-        """Zero gradients by setting them to None rather than filling with zeros.
-
-        This avoids a full memset over all parameter gradient buffers, saving
-        one memory write per parameter per step.
-        """
+        """Zero gradients by setting them to None rather than filling with zeros."""
         optimizer.zero_grad(set_to_none=True)
 
     def on_load_checkpoint(self, checkpoint):
@@ -208,9 +235,6 @@ def main():
     config = load_config(known_args.config)
     config = update_config_from_args(config, unknown_args)
 
-    # TF32 on both the matmul and cuDNN paths. The cuDNN flag covers the
-    # depthwise/pointwise convolutions in PARADIS's SepConv blocks, which
-    # set_float32_matmul_precision alone does not affect.
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.set_float32_matmul_precision("high")

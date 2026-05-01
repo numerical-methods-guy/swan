@@ -14,6 +14,10 @@ data:
   num_train_examples: 512
   num_val_examples: 64
 
+loss:
+  loss_function: "reversed_huber"   # Options: "reversed_huber", "mse", "mae, "amse"
+  delta_loss: 1.0                   # Threshold for the reversed Huber loss
+
 model:
   paradis:
     # --- Top-level model parameters ---
@@ -55,7 +59,7 @@ model:
 training:
   learning_rate: 1.0e-2
   finetune_learning_rate: 1.0e-3
-  pretrain_epochs: 20
+  pretrain_epochs: 25
   finetune_epochs: 0
   nfuture: 1
   amp_mode: "none"      # Options: "none", "fp16", "bf16"

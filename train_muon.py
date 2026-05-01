@@ -18,6 +18,7 @@ from torch_harmonics.examples.losses import (
 
 from model.paradis import Paradis
 from pde_dataset_with_winds import PdeDatasetWithWinds
+from utils.loss import ParadisLoss
 
 
 def load_config(config_path):
@@ -54,6 +55,42 @@ def update_config_from_args(config, unknown_args):
         current[keys[-1]] = val
 
     return config
+
+
+def build_paradis_loss(config):
+    """Construct a ParadisLoss for the shallow water equation setting.
+
+    The SWE model has three output channels (geopotential, vorticity, divergence)
+    with no pressure-level structure, so all variables are treated as surface
+    variables and pressure weighting is effectively bypassed.
+    """
+    nlat = config["data"]["nlat"]
+    loss_cfg = config.get("loss", {})
+
+    loss_function = loss_cfg.get("loss_function", "reversed_huber")
+    delta_loss = loss_cfg.get("delta_loss", 1.0)
+
+    lat_grid = torch.linspace(-90.0, 90.0, nlat, dtype=torch.float32)
+
+    num_features = 3
+    num_surface_vars = 3
+    output_name_order = ["h", "vorticity", "divergence"]
+
+    # Dummy single pressure level so the atmospheric loop is a no-op.
+    pressure_levels = torch.tensor([1000.0], dtype=torch.float32)
+
+    var_loss_weights = torch.ones(num_features, dtype=torch.float32)
+
+    return ParadisLoss(
+        loss_function=loss_function,
+        lat_grid=lat_grid,
+        pressure_levels=pressure_levels,
+        num_features=num_features,
+        num_surface_vars=num_surface_vars,
+        var_loss_weights=var_loss_weights,
+        output_name_order=output_name_order,
+        delta_loss=delta_loss,
+    )
 
 
 def split_params_for_muon(model):
@@ -101,7 +138,8 @@ class SWELightningModule(pl.LightningModule):
             )
         self.model = Paradis(config)
 
-        self.loss_fn = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
+        self.loss_fn = build_paradis_loss(config)
+        self.metric_sq_l2 = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l1 = L1LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l2 = L2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_w11 = W11LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
@@ -120,7 +158,7 @@ class SWELightningModule(pl.LightningModule):
         prd = self.model(inp_fields, inp_winds)
         for _ in range(self.nfuture):
             prd = self.model(prd, inp_winds)
-            
+
         loss = self.loss_fn(prd, tar_fields)
 
         opt_muon.zero_grad(set_to_none=True)
@@ -161,6 +199,7 @@ class SWELightningModule(pl.LightningModule):
             prd = self.model(prd, inp_winds)
         loss = self.loss_fn(prd, tar_fields)
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("val_sq_l2", self.metric_sq_l2(prd, tar_fields), sync_dist=True)
         self.log("val_l1", self.metric_l1(prd, tar_fields), sync_dist=True)
         self.log("val_l2", self.metric_l2(prd, tar_fields), sync_dist=True)
         self.log("val_w11", self.metric_w11(prd, tar_fields), sync_dist=True)
@@ -187,7 +226,7 @@ class SWELightningModule(pl.LightningModule):
             lr = train_cfg["finetune_learning_rate"]
 
         muon_lr = train_cfg.get("muon_lr", lr)
-        adamw_lr = train_cfg.get("adamw_lr", lr * 0.1)
+        adamw_lr = train_cfg.get("adamw_lr", lr)
         muon_momentum = train_cfg.get("muon_momentum", 0.95)
         muon_wd = train_cfg.get("muon_weight_decay", 0.0)
         adamw_wd = train_cfg.get("adamw_weight_decay", 1e-4)
