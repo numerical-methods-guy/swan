@@ -1,2 +1,2 @@
 # swan
-Shallow-Water Artificial Networks (SWAN)
+Shallow-Water Artificial Network (SWAN)
