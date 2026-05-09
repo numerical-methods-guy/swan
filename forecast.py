@@ -235,6 +235,7 @@ def _run_single_ic_inference(
     save_plots=True,
     spectral_analysis=True,
     model_name="Model",
+    output_freq=1,
 ):
     """Run one autoregressive rollout from a single initial condition.
 
@@ -258,6 +259,7 @@ def _run_single_ic_inference(
         save_plots: Whether to save comparison plots.
         spectral_analysis: Whether to save spectral energy plots.
         model_name: Label used in plot titles.
+        output_freq: Save plots and tensors every this many steps (step 0 always saved).
 
     Returns:
         step_metrics: Dict mapping metric name to list of per-step values.
@@ -324,6 +326,7 @@ def _run_single_ic_inference(
     step_metrics = {key: [] for key in metrics_dict.keys()}
     step_metrics["loss"] = []
 
+    # Step 0 (initial condition) is always saved regardless of output_freq.
     if output_dir is not None:
         init_outputs = {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid_init.cpu()}
         torch.save(
@@ -385,7 +388,8 @@ def _run_single_ic_inference(
             step_metrics[name].append(metric_fn(prd_fields, ref_fields).item())
         step_metrics["loss"].append(loss_fn(prd_fields, ref_fields).item())
 
-        if output_dir is not None:
+        # Only write plots and tensors on steps that are multiples of output_freq.
+        if output_dir is not None and step % output_freq == 0:
             torch.save(
                 {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid.cpu()},
                 os.path.join(output_dir, f"{prefix}prediction_{step:0{pad_width}d}.pt"),
@@ -512,6 +516,7 @@ def autoregressive_inference(
     save_plots=True,
     spectral_analysis=True,
     device=torch.device("cpu"),
+    output_freq=1,
 ):
     """Perform autoregressive inference over one or more initial conditions.
 
@@ -537,6 +542,7 @@ def autoregressive_inference(
         save_plots: Whether to save comparison plots.
         spectral_analysis: Whether to save spectral energy plots.
         device: Torch device.
+        output_freq: Save plots and tensors every this many steps (step 0 always saved).
 
     Returns:
         Summary dict with aggregated mean/std metrics and timing statistics.
@@ -554,7 +560,8 @@ def autoregressive_inference(
     all_solver_times = []
 
     print(
-        f"Starting Autoregressive Inference ({autoreg_steps} steps, {num_ics} IC(s), ic_type={ic_type})..."
+        f"Starting Autoregressive Inference ({autoreg_steps} steps, {num_ics} IC(s), "
+        f"ic_type={ic_type}, output_freq={output_freq})..."
     )
 
     with torch.no_grad():
@@ -575,6 +582,7 @@ def autoregressive_inference(
                 save_plots=save_plots and ic_idx == 0,
                 spectral_analysis=spectral_analysis and ic_idx == 0,
                 model_name=model_name,
+                output_freq=output_freq,
             )
             all_step_metrics.append(step_metrics)
             all_ml_times.append(ml_time)
@@ -636,6 +644,12 @@ def main():
     parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility"
     )
+    parser.add_argument(
+        "--output_freq",
+        type=int,
+        default=1,
+        help="Save plots and tensors every N steps (step 0 is always saved)",
+    )
 
     args = parser.parse_args()
 
@@ -650,7 +664,11 @@ def main():
         if args.ic_type == "galewsky":
             args.autoreg_steps = int(6 * 24 * 3600 / config["data"]["dt"])  # 6 days
         else:
-            args.autoreg_steps = 10
+            args.autoreg_steps = 100
+            args.output_freq = 10
+
+    if args.output_freq < 1:
+        raise ValueError("--output_freq must be >= 1")
 
     device = (
         torch.device(args.device)
@@ -669,6 +687,7 @@ def main():
     print(f"Output directory:    {args.output_dir}")
     print(f"Save plots:          {not args.no_plots}")
     print(f"Spectral analysis:   {args.spectral_analysis}")
+    print(f"Output frequency:    every {args.output_freq} step(s)")
     print("=" * 70 + "\n")
 
     print(f"Loading checkpoint: {args.checkpoint}")
@@ -718,6 +737,7 @@ def main():
         save_plots=(not args.no_plots),
         spectral_analysis=args.spectral_analysis,
         device=device,
+        output_freq=args.output_freq,
     )
 
     print("\n" + "=" * 70)
