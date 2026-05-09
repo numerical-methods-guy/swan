@@ -602,7 +602,7 @@ def main():
         "--output_dir", type=str, default="./results", help="Directory to save results"
     )
     parser.add_argument(
-        "--autoreg_steps", type=int, default=10, help="Number of autoregressive steps"
+        "--autoreg_steps", type=int, default=None, help="Number of autoregressive steps"
     )
     parser.add_argument(
         "--num_ics",
@@ -645,6 +645,12 @@ def main():
         raise FileNotFoundError(f"Config file not found: {args.config}")
 
     config = load_config(args.config)
+
+    if args.autoreg_steps is None:
+        if args.ic_type == "galewsky":
+            args.autoreg_steps = int(6 * 24 * 3600 / config["data"]["dt"])  # 6 days
+        else:
+            args.autoreg_steps = 10
 
     device = (
         torch.device(args.device)

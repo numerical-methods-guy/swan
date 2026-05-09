@@ -6,8 +6,8 @@ experiment:
 data:
   nlat: 128
   nlon: 256
-  dt: 900               # Time step for the model (15 mins)
-  dt_solver: 150        # Time step for the underlying solver
+  dt: 60               # Time step for the model
+  dt_solver: 60        # Time step for the underlying solver
   batch_size: 4
   num_workers: 0        # Set to 0 if dataset generation issues occur
   grid: "equiangular"   # PARADIS requires equiangular grid
@@ -24,7 +24,7 @@ model:
     hidden_dim: 32        # cfg.model.latent_size in upstream
     num_layers: 4         # Number of ADR layers
     num_vels: 6           # cfg.model.velocity_vectors in upstream
-    base_dt: 900          # Must match data.dt; cfg.model.base_dt in upstream
+    base_dt: 60           # Must match data.dt; cfg.model.base_dt in upstream
     interpolation: "bicubic"  # cfg.model.adv_interpolation in upstream; "bilinear" or "bicubic"
     bias_channels: 2      # cfg.model.bias_channels in upstream
     activation: "SiLU"    # cfg.model.activation in upstream; "SiLU" or "GELU"
