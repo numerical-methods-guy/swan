@@ -1,4 +1,5 @@
 import os
+import json
 import argparse
 import yaml
 import torch
@@ -17,8 +18,10 @@ from torch_harmonics.examples.losses import (
 )
 
 from model.paradis import Paradis
-from pde_dataset_with_winds import PdeDatasetWithWinds
+from dataset.pde_dataset_with_winds import PdeDatasetWithWinds
+from utils.dataset_utils import build_mixed_dataset
 from utils.loss import ParadisLoss
+from utils.amse_loss import AMSELoss
 
 
 def load_config(config_path):
@@ -58,16 +61,21 @@ def update_config_from_args(config, unknown_args):
 
 
 def build_paradis_loss(config):
-    """Construct a ParadisLoss for the shallow water equation setting.
+    """Construct a loss function for the shallow water equation setting.
 
     The SWE model has three output channels (geopotential, vorticity, divergence)
     with no pressure-level structure, so all variables are treated as surface
     variables and pressure weighting is effectively bypassed.
     """
     nlat = config["data"]["nlat"]
+    nlon = config["data"]["nlon"]
+    grid = config["data"]["grid"]
     loss_cfg = config.get("loss", {})
 
     loss_function = loss_cfg.get("loss_function", "reversed_huber")
+
+    if loss_function == "amse":
+        return AMSELoss(nlat=nlat, nlon=nlon, grid=grid)
     delta_loss = loss_cfg.get("delta_loss", 1.0)
 
     lat_grid = torch.linspace(-90.0, 90.0, nlat, dtype=torch.float32)
@@ -93,10 +101,16 @@ def build_paradis_loss(config):
     )
 
 
+def parse_ic_dict(s):
+    """Parse a JSON string into an ic_dict, converting list values to tuples for precomputed."""
+    d = json.loads(s)
+    return {k: tuple(v) if isinstance(v, list) else v for k, v in d.items()}
+
+
 class SWELightningModule(pl.LightningModule):
     """Lightning module for the PARADIS shallow water equation model."""
 
-    def __init__(self, config):
+    def __init__(self, config, solver, inp_mean, inp_var, wind_mean, wind_var, should_detach=False):
         super().__init__()
         self.save_hyperparameters(config)
         self.config = config
@@ -119,29 +133,56 @@ class SWELightningModule(pl.LightningModule):
 
         self.nfuture = 0
 
+        self.solver = solver
+        self.inp_mean = inp_mean
+        self.inp_var = inp_var
+        self.wind_mean = wind_mean
+        self.wind_var = wind_var
+        self.should_detach = should_detach
+
     def forward(self, fields, winds):
         return self.model(fields, winds)
 
+    def _fields_to_winds(self, prd):
+        """Unnormalize predicted fields, extract winds via solver, renormalize."""
+        device = prd.device
+        fields = prd * self.inp_var.sqrt().to(device) + self.inp_mean.to(device)
+        spec = self.solver.grid2spec(fields)
+        winds = self.solver.getuv(spec[:, 1:])
+        winds = (winds - self.wind_mean.to(device)) / self.wind_var.sqrt().to(device)
+        if self.should_detach:
+            winds = winds.detach()
+        return winds
+
     def training_step(self, batch, batch_idx):
         inp_fields, inp_winds, tar_fields, tar_winds = batch
+        # tar_fields: (batch, n_rollout_steps, 3, nlat, nlon)
+        n_steps = tar_fields.shape[1]
         prd = self.model(inp_fields, inp_winds)
-        for _ in range(self.nfuture):
-            prd = self.model(prd, inp_winds)
-        loss = self.loss_fn(prd, tar_fields)
+        total_loss = self.loss_fn(prd, tar_fields[:, 0])
+        for k in range(1, n_steps):
+            cur_winds = self._fields_to_winds(prd)
+            prd = self.model(prd, cur_winds)
+            total_loss = total_loss + self.loss_fn(prd, tar_fields[:, k])
+        loss = total_loss / n_steps
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         inp_fields, inp_winds, tar_fields, tar_winds = batch
+        n_steps = tar_fields.shape[1]
         prd = self.model(inp_fields, inp_winds)
-        for _ in range(self.nfuture):
-            prd = self.model(prd, inp_winds)
-        loss = self.loss_fn(prd, tar_fields)
+        total_loss = self.loss_fn(prd, tar_fields[:, 0])
+        for k in range(1, n_steps):
+            cur_winds = self._fields_to_winds(prd)
+            prd = self.model(prd, cur_winds)
+            total_loss = total_loss + self.loss_fn(prd, tar_fields[:, k])
+        loss = total_loss / n_steps
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
-        self.log("val_sq_l2", self.metric_sq_l2(prd, tar_fields), sync_dist=True)
-        self.log("val_l1", self.metric_l1(prd, tar_fields), sync_dist=True)
-        self.log("val_l2", self.metric_l2(prd, tar_fields), sync_dist=True)
-        self.log("val_w11", self.metric_w11(prd, tar_fields), sync_dist=True)
+        self.log("val_sq_l2", self.metric_sq_l2(prd, tar_fields[:, -1]), sync_dist=True)
+        self.log("val_l1", self.metric_l1(prd, tar_fields[:, -1]), sync_dist=True)
+        self.log("val_l2", self.metric_l2(prd, tar_fields[:, -1]), sync_dist=True)
+        self.log("val_w11", self.metric_w11(prd, tar_fields[:, -1]), sync_dist=True)
         return loss
 
     def configure_optimizers(self):
@@ -184,34 +225,53 @@ class SWELightningModule(pl.LightningModule):
                 del state_dict[k]
 
 
-def create_datasets(config, device):
-    """Create training and validation datasets."""
+def create_datasets(config, device, train_ic_dict=None, val_ic_dict=None,
+                    n_rollout_steps=1, input_step_idx=0):
+    """Create training and validation datasets.
+
+    Args:
+        config: config dict
+        device: torch device
+        train_ic_dict: dict mapping IC type to number of training examples,
+                       e.g. {"random": 100, "galewsky": 50}.
+                       If None, defaults to {"random": config["data"]["num_train_examples"]}.
+        val_ic_dict: dict mapping IC type to number of validation examples.
+                     If None, defaults to {"random": config["data"]["num_val_examples"]}.
+        n_rollout_steps: number of target steps per sample
+        input_step_idx: which solver step to use as NN input
+    """
     dt = config["data"]["dt"]
     nsteps = dt // config["data"]["dt_solver"]
     nlat = config["data"]["nlat"]
     nlon = config["data"]["nlon"]
 
-    train_dataset = PdeDatasetWithWinds(
-        dt=dt,
-        nsteps=nsteps,
-        dims=(nlat, nlon),
-        normalize=True,
-        device=device,
-    )
-    train_dataset.sht = train_dataset.solver.sht
-    train_dataset.set_initial_condition("random")
-    train_dataset.set_num_examples(config["data"]["num_train_examples"])
+    if train_ic_dict is None:
+        train_ic_dict = {"random": config["data"]["num_train_examples"]}
 
-    val_dataset = PdeDatasetWithWinds(
+    if val_ic_dict is None:
+        val_ic_dict = {"random": config["data"]["num_val_examples"]}
+
+    train_dataset, _ = build_mixed_dataset(
+        ic_dict=train_ic_dict,
         dt=dt,
         nsteps=nsteps,
+        n_rollout_steps=n_rollout_steps,
+        input_step_idx=input_step_idx,
         dims=(nlat, nlon),
-        normalize=True,
         device=device,
+        normalize=True,
     )
-    val_dataset.sht = val_dataset.solver.sht
-    val_dataset.set_initial_condition("random")
-    val_dataset.set_num_examples(config["data"]["num_val_examples"])
+
+    val_dataset, _ = build_mixed_dataset(
+        ic_dict=val_ic_dict,
+        dt=dt,
+        nsteps=nsteps,
+        n_rollout_steps=n_rollout_steps,
+        input_step_idx=input_step_idx,
+        dims=(nlat, nlon),
+        device=device,
+        normalize=True,
+    )
 
     return train_dataset, val_dataset
 
@@ -226,6 +286,26 @@ def main():
         type=str,
         default=None,
         help="Checkpoint to resume from (for finetuning only)",
+    )
+    parser.add_argument(
+        "--n_rollout_steps", type=int, default=1,
+        help="Number of autoregressive target steps per sample",
+    )
+    parser.add_argument(
+        "--input_step_idx", type=int, default=0,
+        help="Number of solver warm-up steps before the NN input",
+    )
+    parser.add_argument(
+        "--train_ic_dict", type=str, default=None,
+        help='JSON ic_dict for training, e.g. \'{"random": 100, "galewsky": 50}\'',
+    )
+    parser.add_argument(
+        "--val_ic_dict", type=str, default=None,
+        help='JSON ic_dict for validation, e.g. \'{"random": 20}\'',
+    )
+    parser.add_argument(
+        "--should_detach", action="store_true", default=False,
+        help="Detach recomputed winds from the computation graph between rollout steps",
     )
 
     known_args, unknown_args = parser.parse_known_args()
@@ -244,7 +324,16 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    train_dataset, val_dataset = create_datasets(config, device)
+    train_ic_dict = parse_ic_dict(known_args.train_ic_dict) if known_args.train_ic_dict else None
+    val_ic_dict = parse_ic_dict(known_args.val_ic_dict) if known_args.val_ic_dict else None
+
+    train_dataset, val_dataset = create_datasets(
+        config, device,
+        train_ic_dict=train_ic_dict,
+        val_ic_dict=val_ic_dict,
+        n_rollout_steps=known_args.n_rollout_steps,
+        input_step_idx=known_args.input_step_idx,
+    )
 
     train_loader = DataLoader(
         train_dataset,
@@ -261,7 +350,16 @@ def main():
         persistent_workers=(config["data"]["num_workers"] > 0),
     )
 
-    model = SWELightningModule(config)
+    solver = train_dataset.datasets[0].solver
+    model = SWELightningModule(
+        config,
+        solver=solver,
+        inp_mean=train_dataset.inp_mean,
+        inp_var=train_dataset.inp_var,
+        wind_mean=train_dataset.wind_mean,
+        wind_var=train_dataset.wind_var,
+        should_detach=known_args.should_detach,
+    )
 
     precision = 32
     if config["training"]["amp_mode"] == "fp16":

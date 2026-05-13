@@ -18,7 +18,7 @@ from torch_harmonics.examples.losses import (
 )
 
 from model.paradis import Paradis
-from pde_dataset_with_winds import PdeDatasetWithWinds
+from dataset.pde_dataset_with_winds import PdeDatasetWithWinds
 
 
 def load_config(config_path):

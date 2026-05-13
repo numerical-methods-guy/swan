@@ -30,11 +30,12 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+import os
 import torch
 
 from math import ceil
 
-from shallow_water_solver import ShallowWaterSolver
+from dataset.shallow_water_solver import ShallowWaterSolver
 
 
 class ShallowWaterPDEDataset(torch.utils.data.Dataset):
@@ -53,6 +54,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         rank=0,
         stream=None,
         dtype=torch.float32,
+        precomputed_folder=None,
     ):
         self.dtype = dtype
 
@@ -60,6 +62,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         self.device = device
         self.stream = stream
         self.rank = rank
+        self.precomputed_folder = precomputed_folder
 
         self.nlat = dims[0]
         self.nlon = dims[1]
@@ -95,29 +98,43 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             self.inp_var = torch.var(inp0, dim=(-1, -2)).reshape(-1, 1, 1)
 
     def __len__(self):
-        length = self.num_examples if self.ictype == "random" else 1
+        length = self.num_examples if self.ictype in ("random", "precomputed") else 1
         return length
 
-    def set_initial_condition(self, ictype="random"):
+    def set_initial_condition(self, ictype="random", precomputed_folder=None):
         self.ictype = ictype
+        if ictype == "precomputed":
+            if precomputed_folder is None and self.precomputed_folder is None:
+                raise ValueError("precomputed_folder must be provided when ictype='precomputed'")
+            if precomputed_folder is not None:
+                self.precomputed_folder = precomputed_folder
 
     def set_num_examples(self, num_examples=32):
         self.num_examples = num_examples
 
-    def _get_sample(self):
+    def _get_sample(self, index=None):
         if self.ictype == "random":
-            inp = self.solver.random_initial_condition(mach=0.2)
+            inp_spec = self.solver.random_initial_condition(mach=0.2)
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "galewsky":
-            inp = self.solver.galewsky_initial_condition()
+            inp_spec = self.solver.galewsky_initial_condition()
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "precomputed":
+            if index is None:
+                raise ValueError("index must be provided when ictype='precomputed'")
+            inp_spec = self.solver.precomputed_initial_condition(self.precomputed_folder, index, step=0)
+            target_path = os.path.join(self.precomputed_folder, f"{index}_1.pt")
+            if os.path.exists(target_path):
+                tar_spec = self.solver.precomputed_initial_condition(self.precomputed_folder, index, step=1)
+            else:
+                tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         else:
             raise NotImplementedError(
                 f"Initial Condition {self.ictype} not implemented."
             )
 
-        # solve pde for n steps to return the target
-        tar = self.solver.timestep(inp, self.nsteps)
-        inp = self.solver.spec2grid(inp)
-        tar = self.solver.spec2grid(tar)
+        inp = self.solver.spec2grid(inp_spec)
+        tar = self.solver.spec2grid(tar_spec)
 
         return inp, tar
 
@@ -125,7 +142,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         if self.rank == 0:
             with torch.inference_mode():
                 with torch.no_grad():
-                    inp, tar = self._get_sample()
+                    inp, tar = self._get_sample(index=index)
 
                     if self.normalize:
                         inp = (inp - self.inp_mean) / torch.sqrt(self.inp_var)

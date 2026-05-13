@@ -335,6 +335,16 @@ class ShallowWaterSolver(nn.Module):
 
         return torch.tril(uspec)
 
+    def precomputed_initial_condition(self, folder: str, index: int, step: int = 0) -> torch.Tensor:
+        """Load a precomputed spectral state from disk.
+
+        Expects a file named {folder}/{index}_{step}.pt containing a spectral state tensor.
+        """
+        import os
+        path = os.path.join(folder, f"{index}_{step}.pt")
+        uspec = torch.load(path, map_location=self.lap.device)
+        return uspec
+
     def timestep(self, uspec: torch.Tensor, nsteps: int) -> torch.Tensor:
         """
         Integrate the solution using Adams-Bashforth / forward Euler for nsteps steps.
