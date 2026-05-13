@@ -22,6 +22,20 @@ Shallow-Water Artificial Network (SWAN)
   - **Variables:** (inherits all from parent) + `n_rollout_steps`, `input_step_idx`
   - **Methods:** `__getitem__`, `_compute_inp_statistics`, `_compute_wind_statistics`, `_get_sample_with_winds` — dispatches to `_get_sample_precomputed` for precomputed ictype, otherwise uses `solver.timestep`, `_get_sample_precomputed` — loads `{index}_0.pt` then advances step-by-step loading `{index}_{s}.pt` where available and falling back to `solver.timestep` for missing files; same fallback logic for each rollout target step
 
+- `dataset_saver.py` — script for generating and saving precomputed trajectory datasets to disk (`ShallowWaterSolver` → spectral states saved as `{index}_{step}.pt`); runs a stability check inline using a finer reference solver; saves normalization stats and metadata
+  - `build_solver(nlat, nlon, dt, dt_solver, device)` — constructs a `ShallowWaterSolver` and returns it with `nsteps`
+  - `make_output_folder(ictype, dt_solver)` — creates `Saved_Datasets/{ictype}_{dt_solver}_{YYYYMMDD}/` and `stability_check/` subfolder
+  - `generate_ic(solver, ictype)` — dispatches to `random_initial_condition` or `galewsky_initial_condition`
+  - `welford_update(count, mean, M2, new_value)` — one step of Welford's online mean/variance algorithm
+  - `save_trajectories(...)` — main generation loop; saves `{i}_{step}.pt` for each trajectory; accumulates normalization stats online via Welford; for the first `n_stability_samples` trajectories runs a reference solver with `dt_solver_ref` in lockstep, saves `stability_check/{i}_{step}_ref.pt`, computes relative L2 error in grid space; returns stats dict and stability summary
+  - `get_git_hash()` — returns current git commit hash for reproducibility
+  - `save_metadata(output_folder, args, nsteps, stats, stability_summary)` — writes `metadata.json` (machine-readable) and `metadata.txt` (human-readable) containing ictype, dt, dt_solver, nsteps, grid dims, n_samples, n_steps_per_trajectory, normalization stats, git hash, timestamp, and stability check results
+  - `visualize(output_folder, index, step, solver, compare_ref)` — loads `{index}_{step}.pt`, converts to grid space, plots h/vorticity/divergence as heatmaps; if `compare_ref=True` also loads `stability_check/{index}_{step}_ref.pt` and shows reference fields and pointwise difference as additional rows
+  - `parse_args()` — CLI arguments: `--ictype`, `--dt`, `--dt_solver`, `--dt_solver_ref`, `--nlat`, `--nlon`, `--n_samples`, `--n_steps_per_trajectory`, `--n_stability_samples`, `--n_stability_steps`, `--stability_threshold`, `--device`, `--visualize_index`, `--visualize_step`, `--compare_ref`
+  - `main()` — entry point; builds solver, generates dataset, saves metadata, optionally visualizes
+
+- `Saved_Datasets/` — directory storing precomputed datasets; each subdirectory holds `.pt` files named `{index}_{step}.pt` (spectral state tensors)
+
 ### `model/`
 - `paradis.py` — Paradis neural architecture (ADR: Advection-Diffusion-Reaction)
 - `blocks.py` — building blocks: GMBlock, CLinear, SepConv
@@ -67,20 +81,6 @@ Shallow-Water Artificial Network (SWAN)
     - `on_train_epoch_end` — manually steps schedulers each epoch
     - `on_validation_epoch_end` — steps validation-based schedulers
     - `on_load_checkpoint`
-
-- `dataset_saver.py` — script for generating and saving precomputed trajectory datasets to disk (`ShallowWaterSolver` → spectral states saved as `{index}_{step}.pt`); runs a stability check inline using a finer reference solver; saves normalization stats and metadata
-  - `build_solver(nlat, nlon, dt, dt_solver, device)` — constructs a `ShallowWaterSolver` and returns it with `nsteps`
-  - `make_output_folder(ictype, dt_solver)` — creates `Saved_Datasets/{ictype}_{dt_solver}_{YYYYMMDD}/` and `stability_check/` subfolder
-  - `generate_ic(solver, ictype)` — dispatches to `random_initial_condition` or `galewsky_initial_condition`
-  - `welford_update(count, mean, M2, new_value)` — one step of Welford's online mean/variance algorithm
-  - `save_trajectories(...)` — main generation loop; saves `{i}_{step}.pt` for each trajectory; accumulates normalization stats online via Welford; for the first `n_stability_samples` trajectories runs a reference solver with `dt_solver_ref` in lockstep, saves `stability_check/{i}_{step}_ref.pt`, computes relative L2 error in grid space; returns stats dict and stability summary
-  - `get_git_hash()` — returns current git commit hash for reproducibility
-  - `save_metadata(output_folder, args, nsteps, stats, stability_summary)` — writes `metadata.json` (machine-readable) and `metadata.txt` (human-readable) containing ictype, dt, dt_solver, nsteps, grid dims, n_samples, n_steps_per_trajectory, normalization stats, git hash, timestamp, and stability check results
-  - `visualize(output_folder, index, step, solver, compare_ref)` — loads `{index}_{step}.pt`, converts to grid space, plots h/vorticity/divergence as heatmaps; if `compare_ref=True` also loads `stability_check/{index}_{step}_ref.pt` and shows reference fields and pointwise difference as additional rows
-  - `parse_args()` — CLI arguments: `--ictype`, `--dt`, `--dt_solver`, `--dt_solver_ref`, `--nlat`, `--nlon`, `--n_samples`, `--n_steps_per_trajectory`, `--n_stability_samples`, `--n_stability_steps`, `--stability_threshold`, `--device`, `--visualize_index`, `--visualize_step`, `--compare_ref`
-  - `main()` — entry point; builds solver, generates dataset, saves metadata, optionally visualizes
-
-- `Saved_Datasets/` — directory storing precomputed datasets; each subdirectory holds `.pt` files named `{index}_{step}.pt` (spectral state tensors)
 
 ### `utils/`
 - `loss.py` — ParadisLoss: weighted loss supporting MSE, MAE, RMSE, reversed Huber, and AMSE
