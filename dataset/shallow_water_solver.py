@@ -39,6 +39,21 @@ from torch_harmonics.quadrature import *
 import numpy as np
 
 
+def _great_circle_distance(
+    lat: torch.Tensor,
+    lon: torch.Tensor,
+    lat0: torch.Tensor,
+    lon0: torch.Tensor,
+) -> torch.Tensor:
+    """Great-circle angular distance (radians) between grid point (lat, lon) and centre (lat0, lon0)."""
+    sin1, cos1 = torch.sin(lat), torch.cos(lat)
+    sin0, cos0 = torch.sin(lat0), torch.cos(lat0)
+    dlon = lon - lon0
+    cosgamma = sin1 * sin0 + cos1 * cos0 * torch.cos(dlon)
+    cosgamma = torch.clamp(cosgamma, -1.0, 1.0)
+    return torch.acos(cosgamma)
+
+
 class ShallowWaterSolver(nn.Module):
     """
     SWE solver class. Interface inspired bu pyspharm and SHTns
@@ -332,6 +347,157 @@ class ShallowWaterSolver(nn.Module):
         # uspec = torch.zeros(3, self.lmax, self.mmax, dtype=phispec.dtype, device=device)
         # uspec[0] = phispec
         # uspec[1:] = vrtdivspec
+
+        return torch.tril(uspec)
+
+    def williamson_case2_initial_condition(
+        self,
+        alpha=None,
+        gh0: float = 29400.0,
+        u0=None,
+    ) -> torch.Tensor:
+        """Williamson test case 2: steady-state geostrophic flow on the sphere.
+
+        The flow is a balanced solid-body rotation tilted at angle alpha from
+        the equator.  Each call with alpha=None draws alpha ~ U(0, pi/2) so
+        the dataset sees a variety of tilt angles.
+
+        Args:
+            alpha: Tilt angle in radians.  If None, sampled from U(0, pi/2).
+            gh0:   Reference geopotential height (m^2/s^2).  Default 29400.
+            u0:    Maximum wind speed (m/s).  If None, set to 2*pi*a / (12 days).
+
+        Returns:
+            uspec: Spectral state tensor (3, lmax, mmax).
+        """
+        device = self.lap.device
+        dtype  = self.lap.dtype
+
+        lat = self.lats.to(device=device, dtype=dtype).reshape(-1, 1)
+        lon = self.lons.to(device=device, dtype=dtype).reshape(1, -1)
+
+        a     = self.radius.to(dtype=dtype)
+        Omega = self.omega.to(dtype=dtype)
+
+        if u0 is None:
+            day = torch.as_tensor(86400.0, device=device, dtype=dtype)
+            u0_t = 2.0 * torch.pi * a / (12.0 * day)
+        else:
+            u0_t = torch.as_tensor(float(u0), device=device, dtype=dtype)
+
+        if alpha is None:
+            alpha_t = (0.5 * torch.pi * torch.rand(1, device=device, dtype=dtype)).item()
+            alpha_t = torch.as_tensor(float(alpha_t), device=device, dtype=dtype)
+        else:
+            alpha_t = torch.as_tensor(float(alpha), device=device, dtype=dtype)
+
+        sinlat = torch.sin(lat)
+        coslat = torch.cos(lat)
+        sinlon = torch.sin(lon)
+        coslon = torch.cos(lon)
+        sinalpha = torch.sin(alpha_t)
+        cosalpha = torch.cos(alpha_t)
+
+        u_grid = u0_t * (coslat * cosalpha + sinlat * coslon * sinalpha)
+        v_grid = -u0_t * sinlon * sinalpha
+
+        cterm = -coslon * coslat * sinalpha + sinlat * cosalpha
+        phi_grid = torch.as_tensor(float(gh0), device=device, dtype=dtype) - (
+            a * Omega * u0_t + 0.5 * u0_t * u0_t
+        ) * cterm ** 2
+
+        uv_grid    = torch.stack([u_grid, v_grid + torch.zeros_like(lat)], dim=0)
+        vrtdiv_spec = self.vrtdivspec(uv_grid)
+        phi_spec    = self.grid2spec(phi_grid.unsqueeze(0))[0]
+
+        ctype = torch.complex128 if dtype == torch.float64 else torch.complex64
+        uspec = torch.zeros(3, self.lmax, self.mmax, dtype=ctype, device=device)
+        uspec[0]  = phi_spec
+        uspec[1:] = vrtdiv_spec.to(dtype=ctype)
+
+        return torch.tril(uspec)
+
+    def gaussian_bells_initial_condition(
+        self,
+        ref_mean: torch.Tensor,
+        ref_std: torch.Tensor,
+        k_min: int = 1,
+        k_max: int = 8,
+        sigma_min_deg: float = 5.0,
+        sigma_max_deg: float = 20.0,
+        signed: bool = True,
+        mean_scale: float = 1.0,
+        std_scale: float = 1.0,
+    ) -> torch.Tensor:
+        """Generate a random Gaussian bells initial condition on the sphere.
+
+        Places K random Gaussian bumps per channel, normalizes, then scales using
+        ref_mean and ref_std so the IC has a similar magnitude to physical states.
+
+        Args:
+            ref_mean: Per-channel reference mean, shape (3,) or scalar.
+            ref_std:  Per-channel reference std,  shape (3,) or scalar.
+            k_min:    Minimum number of bells per channel.
+            k_max:    Maximum number of bells per channel.
+            sigma_min_deg: Minimum bell width in degrees.
+            sigma_max_deg: Maximum bell width in degrees.
+            signed:   If True, amplitudes are drawn from U(-1, 1); else U(0, 1).
+            mean_scale: Multiplier applied to ref_mean.
+            std_scale:  Multiplier applied to ref_std.
+
+        Returns:
+            uspec: Spectral state tensor (3, lmax, mmax) on the solver device.
+        """
+        device = self.lats.device
+        dtype = self.lats.dtype
+
+        sigma_min_rad = sigma_min_deg * (torch.pi / 180.0)
+        sigma_max_rad = sigma_max_deg * (torch.pi / 180.0)
+
+        # lat/lon grids: (nlat,), (nlon,)
+        lats = self.lats  # shape (nlat,)
+        lons = self.lons  # shape (nlon,)
+        # broadcast to (nlat, nlon)
+        lat_grid = lats.unsqueeze(1).expand(self.nlat, self.nlon)
+        lon_grid = lons.unsqueeze(0).expand(self.nlat, self.nlon)
+
+        channels = []
+        for ch in range(3):
+            # Use a channel-specific offset seed so channels are decorrelated
+            K = torch.randint(k_min, k_max + 1, (1,)).item()
+
+            # Sample bell centres: lat from asin(U(-1,1)), lon from U(0, 2pi)
+            lat0 = torch.asin(2.0 * torch.rand(K, device=device, dtype=dtype) - 1.0)
+            lon0 = 2.0 * torch.pi * torch.rand(K, device=device, dtype=dtype)
+
+            # Sample widths and amplitudes
+            sigma = sigma_min_rad + (sigma_max_rad - sigma_min_rad) * torch.rand(K, device=device, dtype=dtype)
+            if signed:
+                amp = 2.0 * torch.rand(K, device=device, dtype=dtype) - 1.0
+            else:
+                amp = torch.rand(K, device=device, dtype=dtype)
+
+            # Accumulate bells: shape (nlat, nlon)
+            field = torch.zeros(self.nlat, self.nlon, device=device, dtype=dtype)
+            for j in range(K):
+                dist = _great_circle_distance(lat_grid, lon_grid, lat0[j], lon0[j])
+                field = field + amp[j] * torch.exp(-0.5 * (dist / sigma[j]) ** 2)
+
+            # Normalize to zero mean, unit std
+            field = (field - field.mean()) / (field.std() + 1e-6)
+
+            # Scale to match physical distribution
+            ch_mean = ref_mean[ch] if ref_mean.ndim > 0 else ref_mean
+            ch_std  = ref_std[ch]  if ref_std.ndim  > 0 else ref_std
+            field = mean_scale * ch_mean + std_scale * ch_std * field
+
+            channels.append(field)
+
+        # Stack to (3, nlat, nlon) and transform to spectral space
+        ugrid = torch.stack(channels, dim=0)  # (3, nlat, nlon)
+        uspec = torch.zeros(3, self.lmax, self.mmax, dtype=torch.complex64, device=device)
+        for ch in range(3):
+            uspec[ch] = self.grid2spec(ugrid[ch])
 
         return torch.tril(uspec)
 

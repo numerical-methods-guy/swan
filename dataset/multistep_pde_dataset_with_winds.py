@@ -133,6 +133,14 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
             spec = self.solver.random_initial_condition(mach=0.2)
         elif self.ictype == "galewsky":
             spec = self.solver.galewsky_initial_condition()
+        elif self.ictype == "gbells":
+            ref_mean = self.base_dataset.gbells_ref_mean
+            ref_std  = self.base_dataset.gbells_ref_std
+            spec = self.solver.gaussian_bells_initial_condition(
+                ref_mean, ref_std, **self.base_dataset.gbells_kwargs
+            )
+        elif self.ictype == "williamson_case2":
+            spec = self.solver.williamson_case2_initial_condition()
         else:
             raise NotImplementedError(f"Initial Condition {self.ictype} not implemented.")
 

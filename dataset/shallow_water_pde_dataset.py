@@ -87,9 +87,13 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             .float()
         )
 
+        self.gbells_kwargs = {}
+        self.gbells_ref_mean = None
+        self.gbells_ref_std = None
+
         self.set_initial_condition(ictype=initial_condition)
 
-        inp0, tar0 = self._get_sample()
+        inp0, tar0 = self._get_sample(index=0)
         self.inp_shape = inp0.shape
         self.tar_shape = tar0.shape
 
@@ -98,16 +102,34 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             self.inp_var = torch.var(inp0, dim=(-1, -2)).reshape(-1, 1, 1)
 
     def __len__(self):
-        length = self.num_examples if self.ictype in ("random", "precomputed") else 1
+        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "williamson_case2") else 1
         return length
 
-    def set_initial_condition(self, ictype="random", precomputed_folder=None):
+    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None):
         self.ictype = ictype
         if ictype == "precomputed":
             if precomputed_folder is None and self.precomputed_folder is None:
                 raise ValueError("precomputed_folder must be provided when ictype='precomputed'")
             if precomputed_folder is not None:
                 self.precomputed_folder = precomputed_folder
+        elif ictype == "gbells":
+            if gbells_kwargs is not None:
+                self.gbells_kwargs = gbells_kwargs
+            if self.gbells_ref_mean is None:
+                self.gbells_ref_mean, self.gbells_ref_std = self._compute_gbells_ref_stats()
+
+    def _compute_gbells_ref_stats(self, n_samples: int = 50):
+        """Compute per-channel mean and std from random ICs for Gaussian bell scaling."""
+        device = self.solver.lats.device
+        means = torch.zeros(3, device=device)
+        stds = torch.zeros(3, device=device)
+        with torch.no_grad():
+            for _ in range(n_samples):
+                spec = self.solver.random_initial_condition(mach=0.2)
+                grid = self.solver.spec2grid(spec)  # (3, nlat, nlon)
+                means += grid.mean(dim=(-1, -2))
+                stds  += grid.std(dim=(-1, -2))
+        return means / n_samples, stds / n_samples
 
     def set_num_examples(self, num_examples=32):
         self.num_examples = num_examples
@@ -118,6 +140,14 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "galewsky":
             inp_spec = self.solver.galewsky_initial_condition()
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "gbells":
+            inp_spec = self.solver.gaussian_bells_initial_condition(
+                self.gbells_ref_mean, self.gbells_ref_std, **self.gbells_kwargs
+            )
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "williamson_case2":
+            inp_spec = self.solver.williamson_case2_initial_condition()
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "precomputed":
             if index is None:

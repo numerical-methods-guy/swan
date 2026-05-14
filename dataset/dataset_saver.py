@@ -34,13 +34,34 @@ def make_output_folder(ictype, dt_solver):
     return folder_path
 
 
-def generate_ic(solver, ictype):
+def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbells_kwargs=None):
     if ictype == "random":
         return solver.random_initial_condition(mach=0.2)
     elif ictype == "galewsky":
         return solver.galewsky_initial_condition()
+    elif ictype == "gbells":
+        if gbells_ref_mean is None or gbells_ref_std is None:
+            raise ValueError("gbells_ref_mean and gbells_ref_std must be provided for ictype='gbells'")
+        kwargs = gbells_kwargs or {}
+        return solver.gaussian_bells_initial_condition(gbells_ref_mean, gbells_ref_std, **kwargs)
+    elif ictype == "williamson_case2":
+        return solver.williamson_case2_initial_condition()
     else:
         raise ValueError(f"Unsupported ictype: {ictype}")
+
+
+def _compute_gbells_ref_stats(solver, n_samples=50):
+    """Compute per-channel mean and std from random ICs for Gaussian bell scaling."""
+    device = solver.lats.device
+    means = torch.zeros(3, device=device)
+    stds  = torch.zeros(3, device=device)
+    with torch.no_grad():
+        for _ in range(n_samples):
+            spec = solver.random_initial_condition(mach=0.2)
+            grid = solver.spec2grid(spec)  # (3, nlat, nlon)
+            means += grid.mean(dim=(-1, -2))
+            stds  += grid.std(dim=(-1, -2))
+    return means / n_samples, stds / n_samples
 
 
 def welford_update(count, mean, M2, new_value):
@@ -55,7 +76,8 @@ def welford_update(count, mean, M2, new_value):
 
 def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
                       output_folder, device, dt, dt_solver_ref,
-                      n_stability_samples, n_stability_steps, stability_threshold):
+                      n_stability_samples, n_stability_steps, stability_threshold,
+                      gbells_kwargs=None):
     """Generate trajectories, save .pt files, compute normalization stats online,
     and run the stability check inline for the first n_stability_samples trajectories."""
 
@@ -71,6 +93,13 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
         .float()
     )
 
+    # pre-compute Gaussian bell reference stats if needed
+    gbells_ref_mean = None
+    gbells_ref_std  = None
+    if ictype == "gbells":
+        print("Computing Gaussian bell reference statistics...")
+        gbells_ref_mean, gbells_ref_std = _compute_gbells_ref_stats(solver)
+
     # Welford accumulators for fields and winds
     field_count = 0
     field_mean  = None
@@ -83,7 +112,10 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
 
     with torch.no_grad():
         for i in range(n_samples):
-            spec = generate_ic(solver, ictype)
+            spec = generate_ic(solver, ictype,
+                               gbells_ref_mean=gbells_ref_mean,
+                               gbells_ref_std=gbells_ref_std,
+                               gbells_kwargs=gbells_kwargs)
 
             # for stability samples, clone the IC so both solvers start identically
             do_stability = i < n_stability_samples
@@ -309,8 +341,17 @@ def visualize(output_folder, index, step, solver, compare_ref=False):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate and save precomputed SWE trajectory datasets.")
-    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky"],
+    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "williamson_case2"],
                         help="Initial condition type")
+    # Gaussian bells options (used when --ictype gbells)
+    parser.add_argument("--gbells_k_min", type=int, default=1, help="Minimum number of bells per channel")
+    parser.add_argument("--gbells_k_max", type=int, default=8, help="Maximum number of bells per channel")
+    parser.add_argument("--gbells_sigma_min_deg", type=float, default=5.0, help="Minimum bell width in degrees")
+    parser.add_argument("--gbells_sigma_max_deg", type=float, default=20.0, help="Maximum bell width in degrees")
+    parser.add_argument("--gbells_mean_scale", type=float, default=1.0, help="Scale applied to ref_mean")
+    parser.add_argument("--gbells_std_scale", type=float, default=1.0, help="Scale applied to ref_std")
+    parser.add_argument("--gbells_unsigned", action="store_true", default=False,
+                        help="If set, bell amplitudes are drawn from U(0,1) instead of U(-1,1)")
     parser.add_argument("--dt", type=int, default=900,
                         help="Model timestep in seconds")
     parser.add_argument("--dt_solver", type=int, default=150,
@@ -350,6 +391,18 @@ def main():
     output_folder = make_output_folder(args.ictype, args.dt_solver)
     print(f"Output folder: {output_folder}")
 
+    gbells_kwargs = None
+    if args.ictype == "gbells":
+        gbells_kwargs = dict(
+            k_min=args.gbells_k_min,
+            k_max=args.gbells_k_max,
+            sigma_min_deg=args.gbells_sigma_min_deg,
+            sigma_max_deg=args.gbells_sigma_max_deg,
+            mean_scale=args.gbells_mean_scale,
+            std_scale=args.gbells_std_scale,
+            signed=not args.gbells_unsigned,
+        )
+
     print(f"\nGenerating {args.n_samples} trajectories ({args.n_steps_per_trajectory} steps each)...")
     stats, stability_summary = save_trajectories(
         solver=solver,
@@ -364,6 +417,7 @@ def main():
         n_stability_samples=args.n_stability_samples,
         n_stability_steps=args.n_stability_steps,
         stability_threshold=args.stability_threshold,
+        gbells_kwargs=gbells_kwargs,
     )
 
     save_metadata(output_folder, args, nsteps, stats, stability_summary)
