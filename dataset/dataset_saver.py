@@ -44,6 +44,11 @@ def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbell
             raise ValueError("gbells_ref_mean and gbells_ref_std must be provided for ictype='gbells'")
         kwargs = gbells_kwargs or {}
         return solver.gaussian_bells_initial_condition(gbells_ref_mean, gbells_ref_std, **kwargs)
+    elif ictype == "gbells_h":
+        if gbells_ref_mean is None or gbells_ref_std is None:
+            raise ValueError("gbells_ref_mean and gbells_ref_std must be provided for ictype='gbells_h'")
+        kwargs = gbells_kwargs or {}
+        return solver.gaussian_bells_height_initial_condition(gbells_ref_mean, gbells_ref_std, **kwargs)
     elif ictype == "williamson_case2":
         return solver.williamson_case2_initial_condition()
     else:
@@ -341,7 +346,7 @@ def visualize(output_folder, index, step, solver, compare_ref=False):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate and save precomputed SWE trajectory datasets.")
-    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "williamson_case2"],
+    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "gbells_h", "williamson_case2"],
                         help="Initial condition type")
     # Gaussian bells options (used when --ictype gbells)
     parser.add_argument("--gbells_k_min", type=int, default=1, help="Minimum number of bells per channel")

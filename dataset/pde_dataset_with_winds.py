@@ -90,6 +90,12 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
                     inp_spec = self.solver.gaussian_bells_initial_condition(
                         ref_mean, ref_std, **self.base_dataset.gbells_kwargs
                     )
+                elif self.ictype == "gbells_h":
+                    ref_mean = self.base_dataset.gbells_ref_mean
+                    ref_std  = self.base_dataset.gbells_ref_std
+                    inp_spec = self.solver.gaussian_bells_height_initial_condition(
+                        ref_mean, ref_std, **self.base_dataset.gbells_kwargs
+                    )
                 elif self.ictype == "williamson_case2":
                     inp_spec = self.solver.williamson_case2_initial_condition()
                 elif self.ictype == "precomputed":
@@ -136,6 +142,13 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
             ref_mean = self.base_dataset.gbells_ref_mean
             ref_std  = self.base_dataset.gbells_ref_std
             inp_spec = self.solver.gaussian_bells_initial_condition(
+                ref_mean, ref_std, **self.base_dataset.gbells_kwargs
+            )
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "gbells_h":
+            ref_mean = self.base_dataset.gbells_ref_mean
+            ref_std  = self.base_dataset.gbells_ref_std
+            inp_spec = self.solver.gaussian_bells_height_initial_condition(
                 ref_mean, ref_std, **self.base_dataset.gbells_kwargs
             )
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)

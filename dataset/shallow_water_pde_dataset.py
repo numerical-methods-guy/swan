@@ -102,7 +102,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             self.inp_var = torch.var(inp0, dim=(-1, -2)).reshape(-1, 1, 1)
 
     def __len__(self):
-        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "williamson_case2") else 1
+        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "williamson_case2") else 1
         return length
 
     def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None):
@@ -143,6 +143,11 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "gbells":
             inp_spec = self.solver.gaussian_bells_initial_condition(
+                self.gbells_ref_mean, self.gbells_ref_std, **self.gbells_kwargs
+            )
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "gbells_h":
+            inp_spec = self.solver.gaussian_bells_height_initial_condition(
                 self.gbells_ref_mean, self.gbells_ref_std, **self.gbells_kwargs
             )
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)

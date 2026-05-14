@@ -350,6 +350,20 @@ class ShallowWaterSolver(nn.Module):
 
         return torch.tril(uspec)
 
+    def gaussian_bells_height_initial_condition(
+        self,
+        ref_mean: torch.Tensor,
+        ref_std: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Gaussian bells in the height channel only; vorticity and divergence are zero.
+
+        Calls gaussian_bells_initial_condition then zeros out channels 1 and 2.
+        """
+        uspec = self.gaussian_bells_initial_condition(ref_mean, ref_std, **kwargs)
+        uspec[1:] = 0.0
+        return uspec
+
     def williamson_case2_initial_condition(
         self,
         alpha=None,
