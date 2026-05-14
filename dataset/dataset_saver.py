@@ -34,7 +34,7 @@ def make_output_folder(ictype, dt_solver):
     return folder_path
 
 
-def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbells_kwargs=None):
+def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbells_kwargs=None, wc6_kwargs=None):
     if ictype == "random":
         return solver.random_initial_condition(mach=0.2)
     elif ictype == "galewsky":
@@ -51,6 +51,9 @@ def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbell
         return solver.gaussian_bells_height_initial_condition(gbells_ref_mean, gbells_ref_std, **kwargs)
     elif ictype == "williamson_case2":
         return solver.williamson_case2_initial_condition()
+    elif ictype == "williamson_case6":
+        wc6_kwargs = wc6_kwargs or {}
+        return solver.williamson_case6_initial_condition(**wc6_kwargs)
     else:
         raise ValueError(f"Unsupported ictype: {ictype}")
 
@@ -82,7 +85,7 @@ def welford_update(count, mean, M2, new_value):
 def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
                       output_folder, device, dt, dt_solver_ref,
                       n_stability_samples, n_stability_steps, stability_threshold,
-                      gbells_kwargs=None):
+                      gbells_kwargs=None, wc6_kwargs=None):
     """Generate trajectories, save .pt files, compute normalization stats online,
     and run the stability check inline for the first n_stability_samples trajectories."""
 
@@ -120,7 +123,8 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
             spec = generate_ic(solver, ictype,
                                gbells_ref_mean=gbells_ref_mean,
                                gbells_ref_std=gbells_ref_std,
-                               gbells_kwargs=gbells_kwargs)
+                               gbells_kwargs=gbells_kwargs,
+                               wc6_kwargs=wc6_kwargs)
 
             # for stability samples, clone the IC so both solvers start identically
             do_stability = i < n_stability_samples
@@ -346,7 +350,7 @@ def visualize(output_folder, index, step, solver, compare_ref=False):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate and save precomputed SWE trajectory datasets.")
-    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "gbells_h", "williamson_case2"],
+    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "gbells_h", "williamson_case2", "williamson_case6"],
                         help="Initial condition type")
     # Gaussian bells options (used when --ictype gbells)
     parser.add_argument("--gbells_k_min", type=int, default=1, help="Minimum number of bells per channel")
@@ -382,6 +386,13 @@ def parse_args():
                         help="Which step to visualize (used with --visualize_index)")
     parser.add_argument("--compare_ref", action="store_true", default=False,
                         help="If set, show stability reference alongside the main sample when visualizing")
+    # Williamson case 6 options (used when --ictype williamson_case6)
+    parser.add_argument("--wc6_r_min", type=int, default=1, help="Minimum wave number R")
+    parser.add_argument("--wc6_r_max", type=int, default=5, help="Maximum wave number R")
+    parser.add_argument("--wc6_omega_min", type=float, default=5e-6, help="Minimum angular frequency (rad/s)")
+    parser.add_argument("--wc6_omega_max", type=float, default=1e-5, help="Maximum angular frequency (rad/s)")
+    parser.add_argument("--wc6_h0_min", type=float, default=6000.0, help="Minimum reference height (m^2/s^2)")
+    parser.add_argument("--wc6_h0_max", type=float, default=10000.0, help="Maximum reference height (m^2/s^2)")
     return parser.parse_args()
 
 
@@ -397,7 +408,7 @@ def main():
     print(f"Output folder: {output_folder}")
 
     gbells_kwargs = None
-    if args.ictype == "gbells":
+    if args.ictype in ("gbells", "gbells_h"):
         gbells_kwargs = dict(
             k_min=args.gbells_k_min,
             k_max=args.gbells_k_max,
@@ -406,6 +417,17 @@ def main():
             mean_scale=args.gbells_mean_scale,
             std_scale=args.gbells_std_scale,
             signed=not args.gbells_unsigned,
+        )
+
+    wc6_kwargs = None
+    if args.ictype == "williamson_case6":
+        wc6_kwargs = dict(
+            r_min=args.wc6_r_min,
+            r_max=args.wc6_r_max,
+            omega_min=args.wc6_omega_min,
+            omega_max=args.wc6_omega_max,
+            h0_min=args.wc6_h0_min,
+            h0_max=args.wc6_h0_max,
         )
 
     print(f"\nGenerating {args.n_samples} trajectories ({args.n_steps_per_trajectory} steps each)...")
@@ -423,6 +445,7 @@ def main():
         n_stability_steps=args.n_stability_steps,
         stability_threshold=args.stability_threshold,
         gbells_kwargs=gbells_kwargs,
+        wc6_kwargs=wc6_kwargs,
     )
 
     save_metadata(output_folder, args, nsteps, stats, stability_summary)

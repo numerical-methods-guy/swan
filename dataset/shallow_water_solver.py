@@ -350,6 +350,86 @@ class ShallowWaterSolver(nn.Module):
 
         return torch.tril(uspec)
 
+    def williamson_case6_initial_condition(
+        self,
+        r_min: int = 1,
+        r_max: int = 5,
+        omega_min: float = 5e-6,
+        omega_max: float = 1e-5,
+        h0_min: float = 6000.0,
+        h0_max: float = 10000.0,
+        eps_cos: float = 1e-6,
+    ) -> torch.Tensor:
+        """Williamson test case 6: Rossby-Haurwitz wave.
+
+        Randomizes wave number R in [r_min, r_max], angular frequency omega in
+        [omega_min, omega_max], and reference height h0 in [h0_min, h0_max].
+        K is set equal to omega (standard coupling).
+
+        Args:
+            r_min, r_max: Range for wave number R (inclusive).
+            omega_min, omega_max: Range for angular frequency (rad/s).
+            h0_min, h0_max: Range for reference geopotential height (m^2/s^2).
+            eps_cos: Small value for numerical stability near the poles.
+
+        Returns:
+            uspec: Spectral state tensor (3, lmax, mmax).
+        """
+        device = self.lap.device
+        dtype  = self.lap.dtype
+
+        lat = self.lats.to(device=device, dtype=dtype).reshape(-1, 1)
+        lon = self.lons.to(device=device, dtype=dtype).reshape(1, -1)
+
+        a     = self.radius.to(dtype=dtype)
+        Omega = self.omega.to(dtype=dtype)
+        g     = self.gravity.to(dtype=dtype)
+
+        R_int   = int(torch.randint(r_min, r_max + 1, (1,)).item())
+        omega_t = torch.as_tensor(
+            omega_min + (omega_max - omega_min) * torch.rand(1).item(),
+            device=device, dtype=dtype,
+        )
+        K_t   = omega_t  # standard coupling
+        h0_t  = torch.as_tensor(
+            h0_min + (h0_max - h0_min) * torch.rand(1).item(),
+            device=device, dtype=dtype,
+        )
+
+        sinlat   = torch.sin(lat)
+        coslat   = torch.cos(lat)
+        cos_safe = torch.clamp(torch.abs(coslat), min=eps_cos) * torch.sign(coslat + 0.0)
+
+        A = (omega_t / 2.0) * (2.0 * Omega + omega_t) * coslat ** 2 + (K_t ** 2) / 4.0 * coslat ** (2 * R_int) * (
+            (R_int + 1) * coslat ** 2
+            + (2.0 * R_int ** 2 - R_int - 2.0)
+            - 2.0 * R_int ** 2 * cos_safe ** (-2)
+        )
+        B = 2.0 * (Omega + omega_t) * K_t / ((R_int + 1) * (R_int + 2)) * coslat ** R_int * (
+            (R_int ** 2 + 2 * R_int + 2) - (R_int + 1) ** 2 * coslat ** 2
+        )
+        C = (K_t ** 2) / 4.0 * coslat ** (2 * R_int) * (
+            (R_int + 1) * coslat ** 2 - (R_int + 2.0)
+        )
+
+        h = h0_t + (a ** 2) * (A + B * torch.cos(R_int * lon) + C * torch.cos(2.0 * R_int * lon)) / g
+
+        cos_pow = coslat ** (R_int - 1)
+        u = (a * omega_t * coslat
+             + a * K_t * cos_pow * (R_int * sinlat ** 2 - coslat ** 2) * torch.cos(R_int * lon))
+        v = -a * K_t * R_int * cos_pow * sinlat * torch.sin(R_int * lon)
+
+        uv_grid    = torch.stack([u, v], dim=0)
+        vrtdiv_spec = self.vrtdivspec(uv_grid)
+        phi_spec    = self.grid2spec(h.unsqueeze(0))[0]
+
+        ctype = torch.complex128 if dtype == torch.float64 else torch.complex64
+        uspec = torch.zeros(3, self.lmax, self.mmax, dtype=ctype, device=device)
+        uspec[0]  = phi_spec
+        uspec[1:] = vrtdiv_spec.to(dtype=ctype)
+
+        return torch.tril(uspec)
+
     def gaussian_bells_height_initial_condition(
         self,
         ref_mean: torch.Tensor,

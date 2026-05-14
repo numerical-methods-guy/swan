@@ -90,6 +90,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         self.gbells_kwargs = {}
         self.gbells_ref_mean = None
         self.gbells_ref_std = None
+        self.wc6_kwargs = {}
 
         self.set_initial_condition(ictype=initial_condition)
 
@@ -102,21 +103,24 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             self.inp_var = torch.var(inp0, dim=(-1, -2)).reshape(-1, 1, 1)
 
     def __len__(self):
-        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "williamson_case2") else 1
+        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "williamson_case2", "williamson_case6") else 1
         return length
 
-    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None):
+    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None, wc6_kwargs=None):
         self.ictype = ictype
         if ictype == "precomputed":
             if precomputed_folder is None and self.precomputed_folder is None:
                 raise ValueError("precomputed_folder must be provided when ictype='precomputed'")
             if precomputed_folder is not None:
                 self.precomputed_folder = precomputed_folder
-        elif ictype == "gbells":
+        elif ictype in ("gbells", "gbells_h"):
             if gbells_kwargs is not None:
                 self.gbells_kwargs = gbells_kwargs
             if self.gbells_ref_mean is None:
                 self.gbells_ref_mean, self.gbells_ref_std = self._compute_gbells_ref_stats()
+        elif ictype == "williamson_case6":
+            if wc6_kwargs is not None:
+                self.wc6_kwargs = wc6_kwargs
 
     def _compute_gbells_ref_stats(self, n_samples: int = 50):
         """Compute per-channel mean and std from random ICs for Gaussian bell scaling."""
@@ -153,6 +157,9 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "williamson_case2":
             inp_spec = self.solver.williamson_case2_initial_condition()
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "williamson_case6":
+            inp_spec = self.solver.williamson_case6_initial_condition(**self.wc6_kwargs)
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "precomputed":
             if index is None:

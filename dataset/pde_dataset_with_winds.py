@@ -98,6 +98,8 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
                     )
                 elif self.ictype == "williamson_case2":
                     inp_spec = self.solver.williamson_case2_initial_condition()
+                elif self.ictype == "williamson_case6":
+                    inp_spec = self.solver.williamson_case6_initial_condition(**self.base_dataset.wc6_kwargs)
                 elif self.ictype == "precomputed":
                     inp_spec = self.solver.precomputed_initial_condition(self.precomputed_folder, i, step=0)
 
@@ -119,9 +121,9 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.base_dataset)
 
-    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None):
+    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None, wc6_kwargs=None):
         """Set the initial condition type."""
-        self.base_dataset.set_initial_condition(ictype, precomputed_folder=precomputed_folder, gbells_kwargs=gbells_kwargs)
+        self.base_dataset.set_initial_condition(ictype, precomputed_folder=precomputed_folder, gbells_kwargs=gbells_kwargs, wc6_kwargs=wc6_kwargs)
         self.ictype = ictype
         if ictype == "precomputed":
             self.precomputed_folder = precomputed_folder
@@ -154,6 +156,9 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "williamson_case2":
             inp_spec = self.solver.williamson_case2_initial_condition()
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "williamson_case6":
+            inp_spec = self.solver.williamson_case6_initial_condition(**self.base_dataset.wc6_kwargs)
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "precomputed":
             if index is None:
