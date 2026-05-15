@@ -51,7 +51,7 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
             precomputed_folder=precomputed_folder,
         )
 
-    def _compute_inp_statistics(self, num_samples=100):
+    def _compute_inp_statistics(self, num_samples=20):
         """Compute field stats over all rollout steps and the input step."""
         inp_samples = []
 
@@ -70,7 +70,7 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
             self.base_dataset.inp_var, torch.ones_like(self.base_dataset.inp_var) * 1e-8
         )
 
-    def _compute_wind_statistics(self, num_samples=100):
+    def _compute_wind_statistics(self, num_samples=20):
         """Compute wind stats over all rollout steps and the input step."""
         wind_samples = []
 
@@ -146,7 +146,7 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
                 ref_mean, ref_std, **self.base_dataset.gbells_kwargs
             )
         elif self.ictype == "williamson_case2":
-            spec = self.solver.williamson_case2_initial_condition()
+            spec = self.solver.williamson_case2_initial_condition(**self.base_dataset.wc2_kwargs)
         elif self.ictype == "williamson_case6":
             spec = self.solver.williamson_case6_initial_condition(**self.base_dataset.wc6_kwargs)
         else:

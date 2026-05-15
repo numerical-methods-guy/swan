@@ -447,19 +447,27 @@ class ShallowWaterSolver(nn.Module):
     def williamson_case2_initial_condition(
         self,
         alpha=None,
-        gh0: float = 29400.0,
+        gh0=None,
         u0=None,
+        gh0_min: float = 20000.0,
+        gh0_max: float = 35000.0,
+        u0_min: float = 10.0,
+        u0_max: float = 60.0,
     ) -> torch.Tensor:
         """Williamson test case 2: steady-state geostrophic flow on the sphere.
 
         The flow is a balanced solid-body rotation tilted at angle alpha from
-        the equator.  Each call with alpha=None draws alpha ~ U(0, pi/2) so
-        the dataset sees a variety of tilt angles.
+        the equator.  Each call with alpha/gh0/u0=None draws from a random range
+        so the dataset sees a variety of flow configurations.
 
         Args:
-            alpha: Tilt angle in radians.  If None, sampled from U(0, pi/2).
-            gh0:   Reference geopotential height (m^2/s^2).  Default 29400.
-            u0:    Maximum wind speed (m/s).  If None, set to 2*pi*a / (12 days).
+            alpha:   Tilt angle in radians.  If None, sampled from U(0, pi/2).
+            gh0:     Reference geopotential height (m^2/s^2).  If None, sampled from U(gh0_min, gh0_max).
+            u0:      Maximum wind speed (m/s).  If None, sampled from U(u0_min, u0_max).
+            gh0_min: Lower bound for gh0 randomization.
+            gh0_max: Upper bound for gh0 randomization.
+            u0_min:  Lower bound for u0 randomization (m/s).
+            u0_max:  Upper bound for u0 randomization (m/s).
 
         Returns:
             uspec: Spectral state tensor (3, lmax, mmax).
@@ -474,10 +482,16 @@ class ShallowWaterSolver(nn.Module):
         Omega = self.omega.to(dtype=dtype)
 
         if u0 is None:
-            day = torch.as_tensor(86400.0, device=device, dtype=dtype)
-            u0_t = 2.0 * torch.pi * a / (12.0 * day)
+            u0_t = torch.as_tensor(
+                u0_min + (u0_max - u0_min) * torch.rand(1).item(), device=device, dtype=dtype
+            )
         else:
             u0_t = torch.as_tensor(float(u0), device=device, dtype=dtype)
+
+        if gh0 is None:
+            gh0_val = gh0_min + (gh0_max - gh0_min) * torch.rand(1).item()
+        else:
+            gh0_val = float(gh0)
 
         if alpha is None:
             alpha_t = (0.5 * torch.pi * torch.rand(1, device=device, dtype=dtype)).item()
@@ -496,7 +510,7 @@ class ShallowWaterSolver(nn.Module):
         v_grid = -u0_t * sinlon * sinalpha
 
         cterm = -coslon * coslat * sinalpha + sinlat * cosalpha
-        phi_grid = torch.as_tensor(float(gh0), device=device, dtype=dtype) - (
+        phi_grid = torch.as_tensor(gh0_val, device=device, dtype=dtype) - (
             a * Omega * u0_t + 0.5 * u0_t * u0_t
         ) * cterm ** 2
 

@@ -53,7 +53,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         self.inp_mean = self.base_dataset.inp_mean
         self.inp_var  = self.base_dataset.inp_var
 
-    def _compute_inp_statistics(self, num_samples=100):
+    def _compute_inp_statistics(self, num_samples=20):
         """Compute mean and variance for field normalization over multiple samples."""
         inp_samples = []
 
@@ -70,7 +70,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
             self.base_dataset.inp_var, torch.ones_like(self.base_dataset.inp_var) * 1e-8
         )
 
-    def _compute_wind_statistics(self, num_samples=100):
+    def _compute_wind_statistics(self, num_samples=20):
         """Compute mean and variance for wind normalization.
 
         Uses 100 initial conditions rather than a single sample so that
@@ -97,7 +97,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
                         ref_mean, ref_std, **self.base_dataset.gbells_kwargs
                     )
                 elif self.ictype == "williamson_case2":
-                    inp_spec = self.solver.williamson_case2_initial_condition()
+                    inp_spec = self.solver.williamson_case2_initial_condition(**self.base_dataset.wc2_kwargs)
                 elif self.ictype == "williamson_case6":
                     inp_spec = self.solver.williamson_case6_initial_condition(**self.base_dataset.wc6_kwargs)
                 elif self.ictype == "precomputed":
@@ -121,9 +121,9 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.base_dataset)
 
-    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None, wc6_kwargs=None):
+    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None):
         """Set the initial condition type."""
-        self.base_dataset.set_initial_condition(ictype, precomputed_folder=precomputed_folder, gbells_kwargs=gbells_kwargs, wc6_kwargs=wc6_kwargs)
+        self.base_dataset.set_initial_condition(ictype, precomputed_folder=precomputed_folder, gbells_kwargs=gbells_kwargs, wc6_kwargs=wc6_kwargs, wc2_kwargs=wc2_kwargs)
         self.ictype = ictype
         if ictype == "precomputed":
             self.precomputed_folder = precomputed_folder
@@ -155,7 +155,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
             )
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "williamson_case2":
-            inp_spec = self.solver.williamson_case2_initial_condition()
+            inp_spec = self.solver.williamson_case2_initial_condition(**self.base_dataset.wc2_kwargs)
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "williamson_case6":
             inp_spec = self.solver.williamson_case6_initial_condition(**self.base_dataset.wc6_kwargs)

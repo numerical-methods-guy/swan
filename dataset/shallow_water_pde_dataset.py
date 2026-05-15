@@ -91,6 +91,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         self.gbells_ref_mean = None
         self.gbells_ref_std = None
         self.wc6_kwargs = {}
+        self.wc2_kwargs = {}
 
         self.set_initial_condition(ictype=initial_condition)
 
@@ -106,7 +107,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "williamson_case2", "williamson_case6") else 1
         return length
 
-    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None, wc6_kwargs=None):
+    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None):
         self.ictype = ictype
         if ictype == "precomputed":
             if precomputed_folder is None and self.precomputed_folder is None:
@@ -121,8 +122,15 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         elif ictype == "williamson_case6":
             if wc6_kwargs is not None:
                 self.wc6_kwargs = wc6_kwargs
+        elif ictype == "williamson_case2":
+            if wc2_kwargs is not None:
+                self.wc2_kwargs = wc2_kwargs
+        elif ictype in ("random", "galewsky"):
+            pass
+        else:
+            raise ValueError(f"Unknown ictype: {ictype}")
 
-    def _compute_gbells_ref_stats(self, n_samples: int = 50):
+    def _compute_gbells_ref_stats(self, n_samples: int = 20):
         """Compute per-channel mean and std from random ICs for Gaussian bell scaling."""
         device = self.solver.lats.device
         means = torch.zeros(3, device=device)
@@ -156,7 +164,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             )
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "williamson_case2":
-            inp_spec = self.solver.williamson_case2_initial_condition()
+            inp_spec = self.solver.williamson_case2_initial_condition(**self.wc2_kwargs)
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "williamson_case6":
             inp_spec = self.solver.williamson_case6_initial_condition(**self.wc6_kwargs)

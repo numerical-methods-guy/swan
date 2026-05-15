@@ -25,16 +25,16 @@ def build_solver(nlat, nlon, dt, dt_solver, device):
     return solver, nsteps
 
 
-def make_output_folder(ictype, dt_solver):
+def make_output_folder(ictype, dt_solver, base_dir=None):
     date_str = datetime.date.today().strftime("%Y%m%d")
     folder_name = f"{ictype}_{dt_solver}_{date_str}"
-    folder_path = os.path.join(SAVED_DATASETS_DIR, folder_name)
+    folder_path = os.path.join(base_dir or SAVED_DATASETS_DIR, folder_name)
     os.makedirs(folder_path, exist_ok=True)
     os.makedirs(os.path.join(folder_path, "stability_check"), exist_ok=True)
     return folder_path
 
 
-def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbells_kwargs=None, wc6_kwargs=None):
+def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None):
     if ictype == "random":
         return solver.random_initial_condition(mach=0.2)
     elif ictype == "galewsky":
@@ -50,7 +50,8 @@ def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbell
         kwargs = gbells_kwargs or {}
         return solver.gaussian_bells_height_initial_condition(gbells_ref_mean, gbells_ref_std, **kwargs)
     elif ictype == "williamson_case2":
-        return solver.williamson_case2_initial_condition()
+        kwargs = wc2_kwargs or {}
+        return solver.williamson_case2_initial_condition(**kwargs)
     elif ictype == "williamson_case6":
         wc6_kwargs = wc6_kwargs or {}
         return solver.williamson_case6_initial_condition(**wc6_kwargs)
@@ -58,7 +59,7 @@ def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbell
         raise ValueError(f"Unsupported ictype: {ictype}")
 
 
-def _compute_gbells_ref_stats(solver, n_samples=50):
+def _compute_gbells_ref_stats(solver, n_samples=20):
     """Compute per-channel mean and std from random ICs for Gaussian bell scaling."""
     device = solver.lats.device
     means = torch.zeros(3, device=device)
@@ -85,7 +86,7 @@ def welford_update(count, mean, M2, new_value):
 def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
                       output_folder, device, dt, dt_solver_ref,
                       n_stability_samples, n_stability_steps, stability_threshold,
-                      gbells_kwargs=None, wc6_kwargs=None):
+                      gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None):
     """Generate trajectories, save .pt files, compute normalization stats online,
     and run the stability check inline for the first n_stability_samples trajectories."""
 
@@ -104,7 +105,7 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
     # pre-compute Gaussian bell reference stats if needed
     gbells_ref_mean = None
     gbells_ref_std  = None
-    if ictype == "gbells":
+    if ictype in ("gbells", "gbells_h"):
         print("Computing Gaussian bell reference statistics...")
         gbells_ref_mean, gbells_ref_std = _compute_gbells_ref_stats(solver)
 
@@ -124,7 +125,8 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
                                gbells_ref_mean=gbells_ref_mean,
                                gbells_ref_std=gbells_ref_std,
                                gbells_kwargs=gbells_kwargs,
-                               wc6_kwargs=wc6_kwargs)
+                               wc6_kwargs=wc6_kwargs,
+                               wc2_kwargs=wc2_kwargs)
 
             # for stability samples, clone the IC so both solvers start identically
             do_stability = i < n_stability_samples
@@ -380,12 +382,19 @@ def parse_args():
     parser.add_argument("--stability_threshold", type=float, default=0.01,
                         help="Relative L2 error threshold for stability pass/fail")
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--save_dir", type=str, default=None,
+                        help="Base directory for output (default: dataset/Saved_Datasets)")
     parser.add_argument("--visualize_index", type=int, default=None,
                         help="If set, visualize this sample index after saving")
     parser.add_argument("--visualize_step", type=int, default=0,
                         help="Which step to visualize (used with --visualize_index)")
     parser.add_argument("--compare_ref", action="store_true", default=False,
                         help="If set, show stability reference alongside the main sample when visualizing")
+    # Williamson case 2 options (used when --ictype williamson_case2)
+    parser.add_argument("--wc2_gh0_min", type=float, default=20000.0, help="Minimum geopotential height (m^2/s^2)")
+    parser.add_argument("--wc2_gh0_max", type=float, default=35000.0, help="Maximum geopotential height (m^2/s^2)")
+    parser.add_argument("--wc2_u0_min", type=float, default=10.0, help="Minimum wind speed (m/s)")
+    parser.add_argument("--wc2_u0_max", type=float, default=60.0, help="Maximum wind speed (m/s)")
     # Williamson case 6 options (used when --ictype williamson_case6)
     parser.add_argument("--wc6_r_min", type=int, default=1, help="Minimum wave number R")
     parser.add_argument("--wc6_r_max", type=int, default=5, help="Maximum wave number R")
@@ -404,7 +413,7 @@ def main():
     print(f"\nBuilding solver (nlat={args.nlat}, nlon={args.nlon}, dt={args.dt}, dt_solver={args.dt_solver})...")
     solver, nsteps = build_solver(args.nlat, args.nlon, args.dt, args.dt_solver, device)
 
-    output_folder = make_output_folder(args.ictype, args.dt_solver)
+    output_folder = make_output_folder(args.ictype, args.dt_solver, base_dir=args.save_dir)
     print(f"Output folder: {output_folder}")
 
     gbells_kwargs = None
@@ -417,6 +426,15 @@ def main():
             mean_scale=args.gbells_mean_scale,
             std_scale=args.gbells_std_scale,
             signed=not args.gbells_unsigned,
+        )
+
+    wc2_kwargs = None
+    if args.ictype == "williamson_case2":
+        wc2_kwargs = dict(
+            gh0_min=args.wc2_gh0_min,
+            gh0_max=args.wc2_gh0_max,
+            u0_min=args.wc2_u0_min,
+            u0_max=args.wc2_u0_max,
         )
 
     wc6_kwargs = None
@@ -446,6 +464,7 @@ def main():
         stability_threshold=args.stability_threshold,
         gbells_kwargs=gbells_kwargs,
         wc6_kwargs=wc6_kwargs,
+        wc2_kwargs=wc2_kwargs,
     )
 
     save_metadata(output_folder, args, nsteps, stats, stability_summary)
