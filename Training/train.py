@@ -102,9 +102,21 @@ def build_paradis_loss(config):
 
 
 def parse_ic_dict(s):
-    """Parse a JSON string into an ic_dict, converting list values to tuples for precomputed."""
+    """Parse a JSON string into an ic_dict.
+
+    Values can be:
+      - int: number of examples, no kwargs
+      - [n, kwargs_dict]: number of examples + IC kwargs
+      - [n, folder_str]: precomputed IC (folder path)
+    """
     d = json.loads(s)
-    return {k: tuple(v) if isinstance(v, list) else v for k, v in d.items()}
+    result = {}
+    for k, v in d.items():
+        if isinstance(v, list):
+            result[k] = (v[0], v[1])  # (n_examples, dict_or_str)
+        else:
+            result[k] = v
+    return result
 
 
 class SWELightningModule(pl.LightningModule):

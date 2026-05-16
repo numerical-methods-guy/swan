@@ -24,6 +24,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         normalize=True,
         stream=None,
         precomputed_folder=None,
+        ic_kwargs=None,
     ):
         self.base_dataset = ShallowWaterPDEDataset(
             dt=dt,
@@ -43,7 +44,11 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         self.normalize = normalize
         self.device = device
 
-        self.set_initial_condition(initial_condition, precomputed_folder=precomputed_folder)
+        gbells_kwargs = ic_kwargs if initial_condition in ("gbells", "gbells_h") else None
+        wc2_kwargs    = ic_kwargs if initial_condition == "williamson_case2" else None
+        wc6_kwargs    = ic_kwargs if initial_condition == "williamson_case6" else None
+        self.set_initial_condition(initial_condition, precomputed_folder=precomputed_folder,
+                                   gbells_kwargs=gbells_kwargs, wc2_kwargs=wc2_kwargs, wc6_kwargs=wc6_kwargs)
         self.set_num_examples(num_examples)
 
         if self.normalize:

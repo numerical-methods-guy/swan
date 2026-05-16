@@ -30,6 +30,7 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
         normalize=True,
         stream=None,
         precomputed_folder=None,
+        ic_kwargs=None,
     ):
         if n_rollout_steps < 1:
             raise ValueError(f"n_rollout_steps must be at least 1, got {n_rollout_steps}")
@@ -49,6 +50,7 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
             normalize=normalize,
             stream=stream,
             precomputed_folder=precomputed_folder,
+            ic_kwargs=ic_kwargs,
         )
 
     def _compute_inp_statistics(self, num_samples=20):

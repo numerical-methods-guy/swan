@@ -332,17 +332,20 @@ def visualize(output_folder, index, step, solver, compare_ref=False):
         axes = axes[None, :]   # make 2D for uniform indexing
 
     for col, name in enumerate(field_names):
-        im = axes[0, col].imshow(fields[col].numpy(), origin="lower", aspect="auto", cmap="RdBu_r")
+        f = fields[col].numpy()
+        vmin, vmax = f.min(), f.max()
+
+        im = axes[0, col].imshow(f, origin="lower", aspect="auto", cmap="RdBu_r", vmin=vmin, vmax=vmax)
         axes[0, col].set_title(f"{name}\nsample {index}, step {step}")
         plt.colorbar(im, ax=axes[0, col])
 
         if compare_ref:
-            im_ref = axes[1, col].imshow(fields_ref[col].numpy(), origin="lower", aspect="auto", cmap="RdBu_r")
+            im_ref = axes[1, col].imshow(fields_ref[col].numpy(), origin="lower", aspect="auto", cmap="RdBu_r", vmin=vmin, vmax=vmax)
             axes[1, col].set_title(f"{name} (ref, dt_solver_ref)")
             plt.colorbar(im_ref, ax=axes[1, col])
 
             diff = (fields[col] - fields_ref[col]).numpy()
-            im_diff = axes[2, col].imshow(diff, origin="lower", aspect="auto", cmap="RdBu_r")
+            im_diff = axes[2, col].imshow(diff, origin="lower", aspect="auto", cmap="RdBu_r", vmin=vmin, vmax=vmax)
             axes[2, col].set_title(f"{name} (difference)")
             plt.colorbar(im_diff, ax=axes[2, col])
 

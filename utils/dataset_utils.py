@@ -41,6 +41,11 @@ def build_mixed_dataset(
                 raise ValueError(
                     f"Value for 'precomputed' must be a (n_examples, folder) tuple, got {val}"
                 )
+        elif isinstance(val, tuple):
+            if not (len(val) == 2 and isinstance(val[0], int) and val[0] > 0 and isinstance(val[1], dict)):
+                raise ValueError(
+                    f"Value for '{ic_type}' must be a positive int or (n_examples, kwargs_dict) tuple, got {val}"
+                )
         else:
             if not isinstance(val, int) or val <= 0:
                 raise ValueError(
@@ -51,6 +56,7 @@ def build_mixed_dataset(
     for ic_type, val in ic_dict.items():
         if ic_type == "precomputed":
             n_examples, folder = val
+            ic_kwargs = None
             d = MultiStepPdeDatasetWithWinds(
                 dt=dt,
                 nsteps=nsteps,
@@ -62,6 +68,20 @@ def build_mixed_dataset(
                 device=device,
                 normalize=normalize,
                 precomputed_folder=folder,
+            )
+        elif isinstance(val, tuple):
+            n_examples, ic_kwargs = val
+            d = MultiStepPdeDatasetWithWinds(
+                dt=dt,
+                nsteps=nsteps,
+                n_rollout_steps=n_rollout_steps,
+                input_step_idx=input_step_idx,
+                dims=dims,
+                initial_condition=ic_type,
+                num_examples=n_examples,
+                device=device,
+                normalize=normalize,
+                ic_kwargs=ic_kwargs,
             )
         else:
             n_examples = val
