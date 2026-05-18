@@ -71,6 +71,11 @@ def build_mixed_dataset(
             )
         elif isinstance(val, tuple):
             n_examples, ic_kwargs = val
+            # for gbells/gbells_h, "gbells_ref_ictype" may be embedded in ic_kwargs
+            gbells_ref_ictype = "random"
+            if ic_type in ("gbells", "gbells_h") and ic_kwargs and "gbells_ref_ictype" in ic_kwargs:
+                ic_kwargs = dict(ic_kwargs)
+                gbells_ref_ictype = ic_kwargs.pop("gbells_ref_ictype")
             d = MultiStepPdeDatasetWithWinds(
                 dt=dt,
                 nsteps=nsteps,
@@ -82,6 +87,7 @@ def build_mixed_dataset(
                 device=device,
                 normalize=normalize,
                 ic_kwargs=ic_kwargs,
+                gbells_ref_ictype=gbells_ref_ictype,
             )
         else:
             n_examples = val

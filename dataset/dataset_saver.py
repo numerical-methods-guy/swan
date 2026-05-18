@@ -59,14 +59,26 @@ def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbell
         raise ValueError(f"Unsupported ictype: {ictype}")
 
 
-def _compute_gbells_ref_stats(solver, n_samples=20):
-    """Compute per-channel mean and std from random ICs for Gaussian bell scaling."""
+def _compute_gbells_ref_stats(solver, n_samples=20, ref_ictype="random"):
+    """Compute per-channel mean and std from ICs of ref_ictype for Gaussian bell scaling.
+
+    ref_ictype: "random", "williamson_case2", "williamson_case6", or "galewsky".
+    """
     device = solver.lats.device
     means = torch.zeros(3, device=device)
     stds  = torch.zeros(3, device=device)
     with torch.no_grad():
         for _ in range(n_samples):
-            spec = solver.random_initial_condition(mach=0.2)
+            if ref_ictype == "random":
+                spec = solver.random_initial_condition(mach=0.2)
+            elif ref_ictype == "williamson_case2":
+                spec = solver.williamson_case2_initial_condition()
+            elif ref_ictype == "williamson_case6":
+                spec = solver.williamson_case6_initial_condition()
+            elif ref_ictype == "galewsky":
+                spec = solver.galewsky_initial_condition()
+            else:
+                raise ValueError(f"Unsupported ref_ictype for gbells ref stats: '{ref_ictype}'")
             grid = solver.spec2grid(spec)  # (3, nlat, nlon)
             means += grid.mean(dim=(-1, -2))
             stds  += grid.std(dim=(-1, -2))
@@ -86,7 +98,8 @@ def welford_update(count, mean, M2, new_value):
 def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
                       output_folder, device, dt, dt_solver_ref,
                       n_stability_samples, n_stability_steps, stability_threshold,
-                      gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None):
+                      gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None,
+                      gbells_ref_ictype="random"):
     """Generate trajectories, save .pt files, compute normalization stats online,
     and run the stability check inline for the first n_stability_samples trajectories."""
 
@@ -106,8 +119,8 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
     gbells_ref_mean = None
     gbells_ref_std  = None
     if ictype in ("gbells", "gbells_h"):
-        print("Computing Gaussian bell reference statistics...")
-        gbells_ref_mean, gbells_ref_std = _compute_gbells_ref_stats(solver)
+        print(f"Computing Gaussian bell reference statistics (ref_ictype={gbells_ref_ictype})...")
+        gbells_ref_mean, gbells_ref_std = _compute_gbells_ref_stats(solver, ref_ictype=gbells_ref_ictype)
 
     # Welford accumulators for fields and winds
     field_count = 0
@@ -244,6 +257,8 @@ def save_metadata(output_folder, args, nsteps, stats, stability_summary):
         "wind_var":                tensor_to_list(stats["wind_var"]),
         "stability_check":         stability_summary,
     }
+    if args.ictype in ("gbells", "gbells_h"):
+        meta["gbells_ref_ictype"] = args.gbells_ref_ictype
 
     # JSON
     json_path = os.path.join(output_folder, "metadata.json")
@@ -256,7 +271,7 @@ def save_metadata(output_folder, args, nsteps, stats, stability_summary):
         "=" * 60,
         "SWAN Precomputed Dataset Metadata",
         "=" * 60,
-        f"  IC type                  : {meta['ictype']}",
+        f"  IC type                  : {meta['ictype']}" + (f"  (gbells_ref_ictype: {meta['gbells_ref_ictype']})" if "gbells_ref_ictype" in meta else ""),
         f"  Model timestep (dt)      : {meta['dt']} s",
         f"  Solver sub-step          : {meta['dt_solver']} s",
         f"  Solver sub-steps per dt  : {meta['nsteps']}",
@@ -366,6 +381,9 @@ def parse_args():
     parser.add_argument("--gbells_std_scale", type=float, default=1.0, help="Scale applied to ref_std")
     parser.add_argument("--gbells_unsigned", action="store_true", default=False,
                         help="If set, bell amplitudes are drawn from U(0,1) instead of U(-1,1)")
+    parser.add_argument("--gbells_ref_ictype", type=str, default="random",
+                        choices=["random", "williamson_case2", "williamson_case6", "galewsky"],
+                        help="IC type used to compute Gaussian bell reference stats (mean/std for scaling)")
     parser.add_argument("--dt", type=int, default=900,
                         help="Model timestep in seconds")
     parser.add_argument("--dt_solver", type=int, default=150,
@@ -468,6 +486,7 @@ def main():
         gbells_kwargs=gbells_kwargs,
         wc6_kwargs=wc6_kwargs,
         wc2_kwargs=wc2_kwargs,
+        gbells_ref_ictype=args.gbells_ref_ictype,
     )
 
     save_metadata(output_folder, args, nsteps, stats, stability_summary)

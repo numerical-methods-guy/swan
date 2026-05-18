@@ -25,6 +25,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         stream=None,
         precomputed_folder=None,
         ic_kwargs=None,
+        gbells_ref_ictype="random",
     ):
         self.base_dataset = ShallowWaterPDEDataset(
             dt=dt,
@@ -48,7 +49,8 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         wc2_kwargs    = ic_kwargs if initial_condition == "williamson_case2" else None
         wc6_kwargs    = ic_kwargs if initial_condition == "williamson_case6" else None
         self.set_initial_condition(initial_condition, precomputed_folder=precomputed_folder,
-                                   gbells_kwargs=gbells_kwargs, wc2_kwargs=wc2_kwargs, wc6_kwargs=wc6_kwargs)
+                                   gbells_kwargs=gbells_kwargs, wc2_kwargs=wc2_kwargs, wc6_kwargs=wc6_kwargs,
+                                   gbells_ref_ictype=gbells_ref_ictype)
         self.set_num_examples(num_examples)
 
         if self.normalize:
@@ -126,9 +128,14 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.base_dataset)
 
-    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None):
+    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None,
+                              wc6_kwargs=None, wc2_kwargs=None, gbells_ref_ictype="random"):
         """Set the initial condition type."""
-        self.base_dataset.set_initial_condition(ictype, precomputed_folder=precomputed_folder, gbells_kwargs=gbells_kwargs, wc6_kwargs=wc6_kwargs, wc2_kwargs=wc2_kwargs)
+        self.base_dataset.set_initial_condition(
+            ictype, precomputed_folder=precomputed_folder,
+            gbells_kwargs=gbells_kwargs, wc6_kwargs=wc6_kwargs, wc2_kwargs=wc2_kwargs,
+            gbells_ref_ictype=gbells_ref_ictype,
+        )
         self.ictype = ictype
         if ictype == "precomputed":
             self.precomputed_folder = precomputed_folder

@@ -18,31 +18,35 @@ Shallow-Water Artificial Network (SWAN)
 - `shallow_water_pde_dataset.py` — on-the-fly dataset generating (input, target) pairs using the solver (`ShallowWaterPDEDataset(Dataset)`)
   - **Variables:** `dtype`, `num_examples`, `device`, `stream`, `rank`, `nlat`, `nlon`, `nsteps`, `normalize`, `solver`, `inp_shape`, `tar_shape`, `inp_mean`, `inp_var`, `ictype`, `precomputed_folder`, `gbells_kwargs`, `gbells_ref_mean`, `gbells_ref_std`, `wc6_kwargs`
   - **Methods:** `__len__`, `__getitem__`, `set_initial_condition`, `set_num_examples`, `_compute_gbells_ref_stats`, `_get_sample`
-  - `_compute_gbells_ref_stats(n_samples)` — draws `n_samples` random ICs and computes per-channel mean and std for Gaussian bell scaling
+  - `_compute_gbells_ref_stats(n_samples, ref_ictype)` — draws `n_samples` ICs of `ref_ictype` (`"random"`, `"williamson_case2"`, `"williamson_case6"`, or `"galewsky"`) and computes per-channel mean and std for Gaussian bell scaling; default `ref_ictype="random"`
+  - `set_initial_condition(ictype, ..., gbells_ref_ictype)` — sets IC type; for `gbells`/`gbells_h`, `gbells_ref_ictype` controls which IC type is used to compute bell scaling reference stats (default `"random"`)
   - `_get_sample` — supports `random`, `galewsky`, `williamson_case2`, `williamson_case6`, `gbells`, `gbells_h`, and `precomputed` ictypes; for precomputed, loads `{index}_0.pt` as input and `{index}_1.pt` as target (falls back to `solver.timestep` if target file is missing)
 
 - `pde_dataset_with_winds.py` — wraps base dataset to also return physical wind components (u, v) (`PdeDatasetWithWinds(Dataset)`)
   - **Variables:** `base_dataset`, `solver`, `nlat`, `nlon`, `grid`, `nsteps`, `normalize`, `device`, `ictype`, `precomputed_folder`, `inp_mean`, `inp_var`, `wind_mean`, `wind_var`
+  - **Constructor:** accepts `gbells_ref_ictype="random"` — forwarded to `set_initial_condition` for bell scaling reference
   - **Methods:** `__len__`, `__getitem__`, `set_initial_condition`, `set_num_examples`, `_compute_inp_statistics`, `_compute_wind_statistics`, `_get_sample_with_winds`
+  - `set_initial_condition(ictype, ..., gbells_ref_ictype)` — sets IC type and forwards `gbells_ref_ictype` to the base dataset
   - All methods support `random`, `galewsky`, `williamson_case2`, `williamson_case6`, `gbells`, `gbells_h`, and `precomputed` ictypes; for precomputed, loads `{index}_0.pt` and `{index}_1.pt` with fallback to `solver.timestep`
 
 - `multistep_pde_dataset_with_winds.py` — child of `PdeDatasetWithWinds`; generates multi-step rollout targets (`MultiStepPdeDatasetWithWinds`)
   - **Variables:** (inherits all from parent) + `n_rollout_steps`, `input_step_idx`
+  - **Constructor:** accepts `gbells_ref_ictype="random"` — forwarded to parent for bell scaling reference
   - **Methods:** `__getitem__`, `_compute_inp_statistics`, `_compute_wind_statistics`, `_get_sample_with_winds`, `_get_sample_precomputed`
-  - `_get_sample_with_winds` — dispatches to `_get_sample_precomputed` for precomputed ictype; supports `random`, `galewsky`, `williamson_case2`, `williamson_case6`, `gbells`, and `gbells_h` for on-the-fly generation
+  - `_get_sample_with_winds` — dispatches to `_get_sample_precomputed` for precomputed ictype; supports `random`, `galewsky`, `williamson_case2`, `williamson_case6`, `gbells`, and `gbells_h` for on-the-fly generation; returns `(inp_fields, inp_winds, tar_fields, tar_winds)` where `tar_fields` is `(n_rollout_steps, 3, nlat, nlon)` unnormalized
   - `_get_sample_precomputed` — loads `{index}_0.pt` then advances step-by-step loading `{index}_{s}.pt` where available and falling back to `solver.timestep` for missing files; same fallback logic for each rollout target step
 
 - `dataset_saver.py` — script for generating and saving precomputed trajectory datasets to disk (`ShallowWaterSolver` → spectral states saved as `{index}_{step}.pt`); runs a stability check inline using a finer reference solver; saves normalization stats and metadata
   - `build_solver(nlat, nlon, dt, dt_solver, device)` — constructs a `ShallowWaterSolver` and returns it with `nsteps`
   - `make_output_folder(ictype, dt_solver)` — creates `Saved_Datasets/{ictype}_{dt_solver}_{YYYYMMDD}/` and `stability_check/` subfolder
   - `generate_ic(solver, ictype, gbells_ref_mean, gbells_ref_std, gbells_kwargs, wc6_kwargs)` — dispatches to the appropriate IC method on the solver
-  - `_compute_gbells_ref_stats(solver, n_samples)` — computes per-channel mean/std from random ICs for Gaussian bell scaling
+  - `_compute_gbells_ref_stats(solver, n_samples, ref_ictype)` — computes per-channel mean/std from ICs of `ref_ictype` for Gaussian bell scaling; `ref_ictype` can be `"random"`, `"williamson_case2"`, `"williamson_case6"`, or `"galewsky"`
   - `welford_update(count, mean, M2, new_value)` — one step of Welford's online mean/variance algorithm
-  - `save_trajectories(..., gbells_kwargs, wc6_kwargs)` — main generation loop; saves `{i}_{step}.pt` for each trajectory; accumulates normalization stats online via Welford; for the first `n_stability_samples` trajectories runs a reference solver with `dt_solver_ref` in lockstep, saves `stability_check/{i}_{step}_ref.pt`, computes relative L2 error in grid space; returns stats dict and stability summary
+  - `save_trajectories(..., gbells_kwargs, wc6_kwargs, gbells_ref_ictype)` — main generation loop; saves `{i}_{step}.pt` for each trajectory; accumulates normalization stats online via Welford; for the first `n_stability_samples` trajectories runs a reference solver with `dt_solver_ref` in lockstep, saves `stability_check/{i}_{step}_ref.pt`, computes relative L2 error in grid space; returns stats dict and stability summary
   - `get_git_hash()` — returns current git commit hash for reproducibility
-  - `save_metadata(output_folder, args, nsteps, stats, stability_summary)` — writes `metadata.json` (machine-readable) and `metadata.txt` (human-readable) containing ictype, dt, dt_solver, nsteps, grid dims, n_samples, n_steps_per_trajectory, normalization stats, git hash, timestamp, and stability check results
+  - `save_metadata(output_folder, args, nsteps, stats, stability_summary)` — writes `metadata.json` (machine-readable) and `metadata.txt` (human-readable) containing ictype, dt, dt_solver, nsteps, grid dims, n_samples, n_steps_per_trajectory, normalization stats, git hash, timestamp, stability check results, and (for gbells/gbells_h) `gbells_ref_ictype`
   - `visualize(output_folder, index, step, solver, compare_ref)` — loads `{index}_{step}.pt`, converts to grid space, plots h/vorticity/divergence as heatmaps; if `compare_ref=True` also loads `stability_check/{index}_{step}_ref.pt` and shows reference fields and pointwise difference as additional rows
-  - `parse_args()` — CLI arguments: `--ictype` (choices: `random`, `galewsky`, `gbells`, `gbells_h`, `williamson_case2`, `williamson_case6`), `--dt`, `--dt_solver`, `--dt_solver_ref`, `--nlat`, `--nlon`, `--n_samples`, `--n_steps_per_trajectory`, `--n_stability_samples`, `--n_stability_steps`, `--stability_threshold`, `--device`, `--visualize_index`, `--visualize_step`, `--compare_ref`; gbells options: `--gbells_k_min`, `--gbells_k_max`, `--gbells_sigma_min_deg`, `--gbells_sigma_max_deg`, `--gbells_mean_scale`, `--gbells_std_scale`, `--gbells_unsigned`; wc6 options: `--wc6_r_min`, `--wc6_r_max`, `--wc6_omega_min`, `--wc6_omega_max`, `--wc6_h0_min`, `--wc6_h0_max`
+  - `parse_args()` — CLI arguments: `--ictype` (choices: `random`, `galewsky`, `gbells`, `gbells_h`, `williamson_case2`, `williamson_case6`), `--dt`, `--dt_solver`, `--dt_solver_ref`, `--nlat`, `--nlon`, `--n_samples`, `--n_steps_per_trajectory`, `--n_stability_samples`, `--n_stability_steps`, `--stability_threshold`, `--device`, `--visualize_index`, `--visualize_step`, `--compare_ref`; gbells options: `--gbells_k_min`, `--gbells_k_max`, `--gbells_sigma_min_deg`, `--gbells_sigma_max_deg`, `--gbells_mean_scale`, `--gbells_std_scale`, `--gbells_unsigned`, `--gbells_ref_ictype` (choices: `random`, `williamson_case2`, `williamson_case6`, `galewsky`); wc6 options: `--wc6_r_min`, `--wc6_r_max`, `--wc6_omega_min`, `--wc6_omega_max`, `--wc6_h0_min`, `--wc6_h0_max`
   - `main()` — entry point; builds solver, builds gbells_kwargs and wc6_kwargs if needed, generates dataset, saves metadata, optionally visualizes
 
 - `Saved_Datasets/` — directory storing precomputed datasets; each subdirectory holds `.pt` files named `{index}_{step}.pt` (spectral state tensors)
@@ -53,6 +57,11 @@ Shallow-Water Artificial Network (SWAN)
 - `advection.py` — NeuralSemiLagrangian semi-Lagrangian advection on the sphere
 - `padding.py` — GeoCyclicPadding (periodic longitude, symmetric poles)
 
+### `utils/`
+- `loss.py` — ParadisLoss: weighted loss supporting MSE, MAE, RMSE, reversed Huber, and AMSE
+- `amse_loss.py` — AMSELoss: spectral loss in spherical harmonic space (Subich et al. 2025)
+- `dataset_utils.py` — `build_mixed_dataset`: builds a ConcatDataset from multiple IC types with shared overall normalization stats; for `gbells`/`gbells_h` entries, `gbells_ref_ictype` can be embedded in the `ic_kwargs` dict (e.g. `{"gbells_h": (100, {"k_min": 1, "gbells_ref_ictype": "williamson_case2"})}`)
+
 ### `Training/`
 - `train.py` — training script using Adam optimizer
   - `load_config` — loads YAML config file
@@ -60,7 +69,7 @@ Shallow-Water Artificial Network (SWAN)
   - `build_paradis_loss` — constructs ParadisLoss from config
   - `parse_ic_dict` — parses a JSON string into an ic_dict; converts list values to tuples for precomputed entries
   - `create_datasets` — builds train/val datasets using `build_mixed_dataset`; accepts `train_ic_dict`, `val_ic_dict`, `n_rollout_steps`, `input_step_idx`
-  - `main` — entry point; CLI args include `--n_rollout_steps`, `--input_step_idx`, `--train_ic_dict`, `--val_ic_dict`, `--should_detach`
+  - `main` — entry point; CLI args include `--n_rollout_steps`, `--input_step_idx`, `--train_ic_dict`, `--val_ic_dict`, `--should_detach`; after dataset creation, val dataset stats are overwritten to match train dataset stats; saves `stats.pt` and `stats.json` to `training.save_dir` containing `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `input_step_idx`
   - `SWELightningModule` — PyTorch Lightning training module
     - **Variables:** `solver`, `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `should_detach`
     - `__init__` — accepts `solver`, `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `should_detach`
@@ -79,7 +88,7 @@ Shallow-Water Artificial Network (SWAN)
   - `parse_ic_dict` — parses a JSON string into an ic_dict; converts list values to tuples for precomputed entries
   - `split_params_for_muon` — separates 2D parameters (Muon) from all others (AdamW)
   - `create_datasets` — builds train/val datasets using `build_mixed_dataset`; accepts `train_ic_dict`, `val_ic_dict`, `n_rollout_steps`, `input_step_idx`
-  - `main` — entry point; CLI args include `--n_rollout_steps`, `--input_step_idx`, `--train_ic_dict`, `--val_ic_dict`, `--should_detach`
+  - `main` — entry point; CLI args include `--n_rollout_steps`, `--input_step_idx`, `--train_ic_dict`, `--val_ic_dict`, `--should_detach`; after dataset creation, val dataset stats are overwritten to match train dataset stats; saves `stats.pt` and `stats.json` to `training.save_dir` containing `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `input_step_idx`
   - `SWELightningModule` — PyTorch Lightning training module
     - **Variables:** `solver`, `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `should_detach`
     - `__init__` — accepts `solver`, `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `should_detach`
@@ -93,11 +102,11 @@ Shallow-Water Artificial Network (SWAN)
     - `on_validation_epoch_end` — steps validation-based schedulers
     - `on_load_checkpoint`
 
-### `utils/`
-- `loss.py` — ParadisLoss: weighted loss supporting MSE, MAE, RMSE, reversed Huber, and AMSE
-- `amse_loss.py` — AMSELoss: spectral loss in spherical harmonic space (Subich et al. 2025)
-- `dataset_utils.py` — `build_mixed_dataset`: builds a ConcatDataset from multiple IC types with shared overall normalization stats
-
 ### Root
 - `forecast.py` — inference and forecasting script
+  - Uses `MultiStepPdeDatasetWithWinds` as IC source; loads normalization stats from `stats.pt` (saved by training) and overrides the dataset's computed stats so train/forecast normalization is identical
+  - `_move_dataset_to_device` — moves solver, sht, and normalization buffers to device
+  - `_run_single_ic_inference` — draws IC and reference trajectory from `dataset._get_sample_with_winds()` (which already applies `input_step_idx` warmup); times ML rollout and solver separately; computes metrics against the dataset's pre-computed `tar_fields` reference; saves per-step tensors, plots, and spectra
+  - `autoregressive_inference` — outer loop over multiple ICs; for `galewsky` ic_type forces `num_ics=1`
+  - `main` — CLI args: `--config`, `--checkpoint`, `--output_dir`, `--autoreg_steps`, `--num_ics`, `--ic_type` (choices: `random`, `galewsky`, `gbells`, `gbells_h`, `williamson_case2`, `williamson_case6`), `--ic_kwargs` (JSON for IC parameters; for gbells/gbells_h may include `"gbells_ref_ictype"`), `--stats_path` (required; path to `stats.pt` from training), `--n_rollout_steps` (dataset rollout horizon, default 40), `--input_step_idx` (overrides value from stats.pt), `--plot_channel`, `--device`, `--no_plots`, `--spectral_analysis`, `--seed`
 - `config_paradis.yaml` — canonical model and training configuration

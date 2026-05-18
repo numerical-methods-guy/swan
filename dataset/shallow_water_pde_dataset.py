@@ -107,7 +107,8 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "williamson_case2", "williamson_case6") else 1
         return length
 
-    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None):
+    def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None,
+                              wc6_kwargs=None, wc2_kwargs=None, gbells_ref_ictype="random"):
         self.ictype = ictype
         if ictype == "precomputed":
             if precomputed_folder is None and self.precomputed_folder is None:
@@ -118,7 +119,9 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             if gbells_kwargs is not None:
                 self.gbells_kwargs = gbells_kwargs
             if self.gbells_ref_mean is None:
-                self.gbells_ref_mean, self.gbells_ref_std = self._compute_gbells_ref_stats()
+                self.gbells_ref_mean, self.gbells_ref_std = self._compute_gbells_ref_stats(
+                    ref_ictype=gbells_ref_ictype
+                )
         elif ictype == "williamson_case6":
             if wc6_kwargs is not None:
                 self.wc6_kwargs = wc6_kwargs
@@ -130,14 +133,27 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         else:
             raise ValueError(f"Unknown ictype: {ictype}")
 
-    def _compute_gbells_ref_stats(self, n_samples: int = 20):
-        """Compute per-channel mean and std from random ICs for Gaussian bell scaling."""
+    def _compute_gbells_ref_stats(self, n_samples: int = 20, ref_ictype: str = "random"):
+        """Compute per-channel mean and std from ICs of ref_ictype for Gaussian bell scaling.
+
+        ref_ictype: which IC type to sample for computing reference stats.
+            Supported: "random", "williamson_case2", "williamson_case6", "galewsky".
+        """
         device = self.solver.lats.device
         means = torch.zeros(3, device=device)
         stds = torch.zeros(3, device=device)
         with torch.no_grad():
             for _ in range(n_samples):
-                spec = self.solver.random_initial_condition(mach=0.2)
+                if ref_ictype == "random":
+                    spec = self.solver.random_initial_condition(mach=0.2)
+                elif ref_ictype == "williamson_case2":
+                    spec = self.solver.williamson_case2_initial_condition()
+                elif ref_ictype == "williamson_case6":
+                    spec = self.solver.williamson_case6_initial_condition()
+                elif ref_ictype == "galewsky":
+                    spec = self.solver.galewsky_initial_condition()
+                else:
+                    raise ValueError(f"Unsupported ref_ictype for gbells ref stats: '{ref_ictype}'")
                 grid = self.solver.spec2grid(spec)  # (3, nlat, nlon)
                 means += grid.mean(dim=(-1, -2))
                 stds  += grid.std(dim=(-1, -2))

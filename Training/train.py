@@ -347,6 +347,33 @@ def main():
         input_step_idx=known_args.input_step_idx,
     )
 
+    # Overwrite val stats with train stats so both datasets use identical normalization.
+    for attr in ("inp_mean", "inp_var", "wind_mean", "wind_var"):
+        val = getattr(train_dataset, attr)
+        setattr(val_dataset, attr, val)
+        for sub in val_dataset.datasets:
+            setattr(sub, attr, val)
+
+    # Save normalization stats alongside checkpoints.
+    stats_save_dir = config["training"]["save_dir"]
+    os.makedirs(stats_save_dir, exist_ok=True)
+    torch.save({
+        "inp_mean": train_dataset.inp_mean.cpu(),
+        "inp_var": train_dataset.inp_var.cpu(),
+        "wind_mean": train_dataset.wind_mean.cpu(),
+        "wind_var": train_dataset.wind_var.cpu(),
+        "input_step_idx": known_args.input_step_idx,
+    }, os.path.join(stats_save_dir, "stats.pt"))
+    with open(os.path.join(stats_save_dir, "stats.json"), "w") as _f:
+        json.dump({
+            "inp_mean": train_dataset.inp_mean.cpu().tolist(),
+            "inp_var": train_dataset.inp_var.cpu().tolist(),
+            "wind_mean": train_dataset.wind_mean.cpu().tolist(),
+            "wind_var": train_dataset.wind_var.cpu().tolist(),
+            "input_step_idx": known_args.input_step_idx,
+        }, _f, indent=2)
+    print(f"Saved normalization stats to {stats_save_dir}/stats.{{pt,json}}")
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=config["data"]["batch_size"],

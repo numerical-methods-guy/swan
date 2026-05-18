@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import argparse
 import yaml
@@ -18,7 +19,7 @@ from torch_harmonics.examples.losses import (
 )
 
 from model.paradis import Paradis
-from dataset.pde_dataset_with_winds import PdeDatasetWithWinds
+from dataset.multistep_pde_dataset_with_winds import MultiStepPdeDatasetWithWinds
 
 
 def load_config(config_path):
@@ -202,24 +203,6 @@ def _move_dataset_to_device(dataset, device):
     dataset.wind_var = dataset.wind_var.to(device)
 
 
-def _get_ic(solver, ic_type, mach=0.2):
-    """Return a spectral initial condition from the solver.
-
-    Args:
-        solver: ShallowWaterSolver instance.
-        ic_type: ``"random"`` or ``"galewsky"``.
-        mach: Mach number passed to random_initial_condition (ignored for galewsky).
-    """
-    if ic_type == "random":
-        return solver.random_initial_condition(mach=mach)
-    elif ic_type == "galewsky":
-        return solver.galewsky_initial_condition()
-    else:
-        raise ValueError(
-            f"Unknown ic_type '{ic_type}'. Expected 'random' or 'galewsky'."
-        )
-
-
 def _run_single_ic_inference(
     model,
     dataset,
@@ -228,7 +211,6 @@ def _run_single_ic_inference(
     nsteps,
     autoreg_steps,
     device,
-    ic_type="random",
     output_dir=None,
     ic_index=None,
     plot_channel=0,
@@ -236,28 +218,11 @@ def _run_single_ic_inference(
     spectral_analysis=True,
     model_name="Model",
 ):
-    """Run one autoregressive rollout from a single initial condition.
+    """Run one autoregressive rollout from a single initial condition drawn from dataset.
 
-    The ML model and the reference numerical solver are each timed over the
-    full rollout horizon independently, with CUDA synchronization guards on GPU
-    so the reported times are accurate. Per-step metrics and plot/tensor outputs
-    are collected in a second pass to avoid I/O polluting the timing loop.
-
-    Args:
-        model: The PARADIS LightningModule in eval mode.
-        dataset: PdeDatasetWithWinds instance with all buffers on the target device.
-        loss_fn: Spherical L2 loss.
-        metrics_dict: Dict mapping metric name to callable.
-        nsteps: Number of solver substeps per model timestep.
-        autoreg_steps: Number of autoregressive steps to roll out.
-        device: Torch device.
-        ic_type: Initial condition type — ``"random"`` (mach=0.2) or ``"galewsky"``.
-        output_dir: If provided, tensors/plots/spectra are saved here.
-        ic_index: IC index used as a filename prefix when output_dir is set.
-        plot_channel: Field channel to visualise (0=h, 1=vorticity, 2=divergence).
-        save_plots: Whether to save comparison plots.
-        spectral_analysis: Whether to save spectral energy plots.
-        model_name: Label used in plot titles.
+    The dataset (MultiStepPdeDatasetWithWinds) handles IC generation, input_step_idx
+    warmup, and ic_kwargs. Stats (inp_mean/var, wind_mean/var) must already be set
+    on the dataset from the saved stats.pt file before calling this function.
 
     Returns:
         step_metrics: Dict mapping metric name to list of per-step values.
@@ -273,12 +238,11 @@ def _run_single_ic_inference(
     wind_var = dataset.wind_var
 
     # --- Timing pass: ML model ---
-    ic = _get_ic(dataset.solver, ic_type)
+    inp_fields, inp_winds_raw, _, _ = dataset._get_sample_with_winds()
 
-    prd_fields = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
+    prd_fields = (inp_fields - inp_mean) / torch.sqrt(inp_var)
     prd_fields = prd_fields.unsqueeze(0)
-    prd_winds_raw = dataset.solver.getuv(ic[1:])
-    prd_winds = (prd_winds_raw - wind_mean) / torch.sqrt(wind_var)
+    prd_winds = (inp_winds_raw - wind_mean) / torch.sqrt(wind_var)
     prd_winds = prd_winds.unsqueeze(0)
 
     if device.type == "cuda":
@@ -298,7 +262,7 @@ def _run_single_ic_inference(
     ml_time = time.perf_counter() - ml_start
 
     # --- Timing pass: reference numerical solver ---
-    ref_uspec = ic.clone()
+    ref_uspec = dataset.solver.grid2spec(inp_fields)
 
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -312,12 +276,13 @@ def _run_single_ic_inference(
     solver_time = time.perf_counter() - solver_start
 
     # --- Metrics and output pass ---
-    ic = _get_ic(dataset.solver, ic_type)
-    uspec = ic.clone()
+    # tar_fields: (n_rollout_steps, 3, nlat, nlon), tar_winds: (n_rollout_steps, 2, nlat, nlon)
+    # unnormalized; from the same solver that generated the IC via input_step_idx warmup
+    inp_fields, prd_uv_grid_init, tar_fields, tar_winds = dataset._get_sample_with_winds()
+    n_metric_steps = min(autoreg_steps, tar_fields.shape[0])
 
-    prd_fields = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
+    prd_fields = (inp_fields - inp_mean) / torch.sqrt(inp_var)
     prd_fields = prd_fields.unsqueeze(0)
-    prd_uv_grid_init = dataset.solver.getuv(ic[1:])
     prd_winds = (prd_uv_grid_init - wind_mean) / torch.sqrt(wind_var)
     prd_winds = prd_winds.unsqueeze(0)
 
@@ -375,17 +340,17 @@ def _run_single_ic_inference(
         prd_winds = (prd_uv_grid - wind_mean) / torch.sqrt(wind_var)
         prd_winds = prd_winds.unsqueeze(0)
 
-        uspec = dataset.solver.timestep(uspec, nsteps)
-        ref_grid = dataset.solver.spec2grid(uspec)
-        ref_uv_grid = dataset.solver.getuv(uspec[1:])
-        ref_fields = (ref_grid - inp_mean) / torch.sqrt(inp_var)
-        ref_fields = ref_fields.unsqueeze(0)
+        if step <= n_metric_steps:
+            ref_grid = tar_fields[step - 1]       # (3, nlat, nlon), unnormalized
+            ref_uv_grid = tar_winds[step - 1]     # (2, nlat, nlon)
+            ref_fields = (ref_grid - inp_mean) / torch.sqrt(inp_var)
+            ref_fields = ref_fields.unsqueeze(0)
 
-        for name, metric_fn in metrics_dict.items():
-            step_metrics[name].append(metric_fn(prd_fields, ref_fields).item())
-        step_metrics["loss"].append(loss_fn(prd_fields, ref_fields).item())
+            for name, metric_fn in metrics_dict.items():
+                step_metrics[name].append(metric_fn(prd_fields, ref_fields).item())
+            step_metrics["loss"].append(loss_fn(prd_fields, ref_fields).item())
 
-        if output_dir is not None:
+        if output_dir is not None and step <= n_metric_steps:
             torch.save(
                 {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid.cpu()},
                 os.path.join(output_dir, f"{prefix}prediction_{step:0{pad_width}d}.pt"),
@@ -442,7 +407,7 @@ def _run_single_ic_inference(
                 )
                 plt.close()
 
-            if spectral_analysis:
+            if spectral_analysis and step <= n_metric_steps:
                 pred_spectra = compute_energy_spectra(prd_fields, dataset.sht)
                 truth_spectra = compute_energy_spectra(ref_fields, dataset.sht)
                 plot_energy_spectra(
@@ -524,7 +489,7 @@ def autoregressive_inference(
 
     Args:
         model: The PARADIS LightningModule.
-        dataset: PdeDatasetWithWinds instance.
+        dataset: MultiStepPdeDatasetWithWinds instance with training stats overridden.
         loss_fn: Spherical L2 loss.
         metrics_dict: Dict mapping metric name to callable.
         output_dir: Directory to save results.
@@ -532,7 +497,7 @@ def autoregressive_inference(
         model_name: Label used in plot titles.
         autoreg_steps: Number of autoregressive steps per rollout.
         num_ics: Number of initial conditions to average over (forced to 1 for galewsky).
-        ic_type: ``"random"`` or ``"galewsky"``.
+        ic_type: IC type string (for galewsky, num_ics is forced to 1).
         plot_channel: Field channel to visualise.
         save_plots: Whether to save comparison plots.
         spectral_analysis: Whether to save spectral energy plots.
@@ -568,7 +533,6 @@ def autoregressive_inference(
                 nsteps=nsteps,
                 autoreg_steps=autoreg_steps,
                 device=device,
-                ic_type=ic_type,
                 output_dir=output_dir if ic_idx == 0 else None,
                 ic_index=ic_idx,
                 plot_channel=plot_channel,
@@ -614,8 +578,21 @@ def main():
         "--ic_type",
         type=str,
         default="random",
-        choices=["random", "galewsky"],
-        help="Initial condition type: random (mach=0.2) or galewsky barotropic jet",
+        choices=["random", "galewsky", "gbells", "gbells_h", "williamson_case2", "williamson_case6"],
+        help="Initial condition type",
+    )
+    parser.add_argument(
+        "--ic_kwargs",
+        type=str,
+        default=None,
+        help="JSON kwargs for the IC (e.g. bell params for gbells/gbells_h, wc2/wc6 range overrides). "
+             "For gbells/gbells_h you may also include 'gbells_ref_ictype' to choose the scaling reference.",
+    )
+    parser.add_argument(
+        "--stats_path",
+        type=str,
+        required=True,
+        help="Path to stats.pt saved by a training run (contains inp_mean/var, wind_mean/var, input_step_idx)",
     )
     parser.add_argument(
         "--plot_channel",
@@ -635,6 +612,18 @@ def main():
     )
     parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility"
+    )
+    parser.add_argument(
+        "--n_rollout_steps",
+        type=int,
+        default=40,
+        help="Autoregressive rollout steps for the dataset's reference trajectory",
+    )
+    parser.add_argument(
+        "--input_step_idx",
+        type=int,
+        default=None,
+        help="Solver warm-up steps before NN input. Defaults to the value saved in stats.pt.",
     )
 
     args = parser.parse_args()
@@ -659,7 +648,7 @@ def main():
     print(f"Device:              {device}")
     print(f"Autoregressive steps:{args.autoreg_steps}")
     print(f"IC type:             {args.ic_type}")
-    print(f"Initial conditions:  {args.num_ics if args.ic_type == 'random' else 1}")
+    print(f"Initial conditions:  {1 if args.ic_type == 'galewsky' else args.num_ics}")
     print(f"Output directory:    {args.output_dir}")
     print(f"Save plots:          {not args.no_plots}")
     print(f"Spectral analysis:   {args.spectral_analysis}")
@@ -678,18 +667,42 @@ def main():
     model_module.eval()
     print("Checkpoint loaded successfully.\n")
 
-    print("Setting up Shallow Water Solver...")
+    print("Loading normalization stats...")
+    stats = torch.load(args.stats_path, map_location=device)
+    input_step_idx = args.input_step_idx if args.input_step_idx is not None else int(stats["input_step_idx"])
+    print(f"  stats_path:     {args.stats_path}")
+    print(f"  input_step_idx: {input_step_idx}\n")
+
+    print("Setting up dataset and solver...")
     dt = config["data"]["dt"]
     nsteps = dt // config["data"]["dt_solver"]
+    ic_kwargs = json.loads(args.ic_kwargs) if args.ic_kwargs else None
 
-    dataset = PdeDatasetWithWinds(
+    gbells_ref_ictype = "random"
+    if ic_kwargs and args.ic_type in ("gbells", "gbells_h") and "gbells_ref_ictype" in ic_kwargs:
+        ic_kwargs = dict(ic_kwargs)
+        gbells_ref_ictype = ic_kwargs.pop("gbells_ref_ictype")
+
+    dataset = MultiStepPdeDatasetWithWinds(
         dt=dt,
         nsteps=nsteps,
+        n_rollout_steps=args.n_rollout_steps,
+        input_step_idx=input_step_idx,
         dims=(config["data"]["nlat"], config["data"]["nlon"]),
-        normalize=True,
+        initial_condition=args.ic_type,
+        num_examples=args.num_ics,
         device=device,
+        normalize=True,
+        ic_kwargs=ic_kwargs,
+        gbells_ref_ictype=gbells_ref_ictype,
     )
     dataset.sht = dataset.solver.sht
+
+    # override dataset stats with training stats so forecast uses identical normalization
+    dataset.inp_mean  = stats["inp_mean"].to(device)
+    dataset.inp_var   = stats["inp_var"].to(device)
+    dataset.wind_mean = stats["wind_mean"].to(device)
+    dataset.wind_var  = stats["wind_var"].to(device)
 
     metrics_dict = {
         "L1_error": model_module.metric_l1,
