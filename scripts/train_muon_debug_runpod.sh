@@ -1,23 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=swan_muon_debug
-#SBATCH --account=eccc_pegasus_mrd
-#SBATCH --partition=gpu_a100
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
-#SBATCH --gres=gpu:1
-#SBATCH --mem=109G
-#SBATCH --time=00:30:00
-#SBATCH --output=/home/avg000/swan/slurm_logs/%j.log
-
 set -euo pipefail
 
-REPO="/home/avg000/swan"
-PY="/home/avg000/miniconda3/envs/swan/bin/python"
-SAVEDIR="/space/hall0/work/eccc/mrd/rpnatm/avg000/test_runs_for_debug"
+REPO="/root/workspace/swan"
+PY="python3"
+SAVEDIR="/root/workspace/debug_runs"
 mkdir -p "$SAVEDIR"
 
-LOGDIR="$REPO/slurm_logs"
+LOGDIR="$REPO/logs"
 mkdir -p "$LOGDIR"
 
 cd "$REPO"
@@ -30,7 +19,7 @@ FAIL_SUMMARY="$LOGDIR/failures_swan_muon_debug_${TS}.txt"
 : > "$GPU_LOGFILE"
 
 echo "Host: $(hostname)"        | tee -a "$LOGFILE"
-echo "Job ID: $SLURM_JOB_ID"   | tee -a "$LOGFILE"
+echo "PID: $$"                  | tee -a "$LOGFILE"
 echo "Time: $(date)"           | tee -a "$LOGFILE"
 echo "GPU:"                    | tee -a "$LOGFILE"
 nvidia-smi 2>&1                | tee -a "$LOGFILE" || true
@@ -51,7 +40,7 @@ log_gpu_usage &
 GPU_MONITOR_PID=$!
 echo "GPU monitor PID: $GPU_MONITOR_PID  log: $GPU_LOGFILE" | tee -a "$LOGFILE"
 
-cp "$0" "$SAVEDIR/train_muon_debug_${TS}.slurm"
+cp "$0" "$SAVEDIR/train_muon_debug_${TS}.sh"
 
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY Training/train_muon.py \
   --config config_paradis.yaml \
