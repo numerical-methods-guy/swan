@@ -1,7 +1,7 @@
 import torch
 
-from paradis.blocks import GMBlock
-from paradis.padding import GeoCyclicPadding
+from model.blocks import GMBlock
+from model.padding import GeoCyclicPadding
 
 
 class NeuralSemiLagrangian(torch.nn.Module):
@@ -15,7 +15,10 @@ class NeuralSemiLagrangian(torch.nn.Module):
         lat_grid: torch.Tensor,
         lon_grid: torch.Tensor,
         interpolation: str = "bicubic",
-        project_advection=True,
+        down_proj_layers: list = None,
+        up_proj_layers: list = None,
+        down_proj_ldim: int = 0,
+        up_proj_ldim: int = 0,
     ):
         super().__init__()
 
@@ -28,46 +31,50 @@ class NeuralSemiLagrangian(torch.nn.Module):
         self.num_vels = num_vels
         self.mesh_size = mesh_size
 
-        if project_advection:
-            self.down_projection = GMBlock(
-                layers=["CLinear"],
-                input_dim=hidden_dim,
-                output_dim=num_vels,
-                mesh_size=mesh_size,
-                kernel_size=1,
-            )
+        if down_proj_layers is None:
+            down_proj_layers = ["CLinear"]
+        if up_proj_layers is None:
+            up_proj_layers = ["SepConv"]
 
-            self.up_projection = GMBlock(
-                layers=["SepConv"],
-                input_dim=num_vels,
-                output_dim=hidden_dim,
-                mesh_size=mesh_size,
-                kernel_size=1,
-            )
-        else:
-            self.num_vels = hidden_dim
-            self.down_projection = lambda x: x
-            self.up_projection = lambda x: x
+        self.down_projection = GMBlock(
+            layers=down_proj_layers,
+            input_dim=hidden_dim,
+            output_dim=num_vels,
+            mesh_size=mesh_size,
+            hidden_dim=down_proj_ldim,
+        )
+
+        self.up_projection = GMBlock(
+            layers=up_proj_layers,
+            input_dim=num_vels,
+            output_dim=hidden_dim,
+            mesh_size=mesh_size,
+            hidden_dim=up_proj_ldim,
+        )
 
         self.interpolation = interpolation
 
         H, W = mesh_size
 
         self.register_buffer(
-            "lat_grid", lat_grid.unsqueeze(0).unsqueeze(0).contiguous().clone()
+            "lat_grid",
+            lat_grid.unsqueeze(0).unsqueeze(0).contiguous().clone(),
+            persistent=False,
         )
         self.register_buffer(
-            "lon_grid", lon_grid.unsqueeze(0).unsqueeze(0).contiguous().clone()
+            "lon_grid",
+            lon_grid.unsqueeze(0).unsqueeze(0).contiguous().clone(),
+            persistent=False,
         )
 
-        self.register_buffer("Hf", torch.tensor(float(H)))
-        self.register_buffer("Wf", torch.tensor(float(W)))
-        self.register_buffer("min_lat", torch.min(lat_grid))
-        self.register_buffer("max_lat", torch.max(lat_grid))
-        self.register_buffer("min_lon", torch.min(lon_grid))
-        self.register_buffer("max_lon", torch.max(lon_grid))
-        self.register_buffer("d_lon", self.max_lon - self.min_lon)
-        self.register_buffer("d_lat", self.max_lat - self.min_lat)
+        self.register_buffer("Hf", torch.tensor(float(H)), persistent=False)
+        self.register_buffer("Wf", torch.tensor(float(W)), persistent=False)
+        self.register_buffer("min_lat", torch.min(lat_grid), persistent=False)
+        self.register_buffer("max_lat", torch.max(lat_grid), persistent=False)
+        self.register_buffer("min_lon", torch.min(lon_grid), persistent=False)
+        self.register_buffer("max_lon", torch.max(lon_grid), persistent=False)
+        self.register_buffer("d_lon", self.max_lon - self.min_lon, persistent=False)
+        self.register_buffer("d_lat", self.max_lat - self.min_lat, persistent=False)
 
     def _transform_to_latlon(
         self,
@@ -122,9 +129,9 @@ class NeuralSemiLagrangian(torch.nn.Module):
         batch_size = hidden_features.shape[0]
         H, W = self.mesh_size
 
-        hidden_features = self.enforce_pole_continuity(hidden_features)
-
         projected_inputs = self.down_projection(hidden_features)
+
+        projected_inputs = self.enforce_pole_continuity(projected_inputs)
 
         lon_prime = -u * dt
         lat_prime = -v * dt
@@ -164,9 +171,10 @@ class NeuralSemiLagrangian(torch.nn.Module):
             padding_mode="zeros",
         )
 
+        interpolated = self.enforce_pole_continuity(interpolated)
+
         interpolated = self.up_projection(
             interpolated.reshape(batch_size, self.num_vels, H, W)
         )
 
-        interpolated = self.enforce_pole_continuity(interpolated)
         return interpolated

@@ -1,15 +1,15 @@
 import torch
-from torch_harmonics.examples import PdeDataset
+
+from shallow_water_pde_dataset import ShallowWaterPDEDataset
 
 
 class PdeDatasetWithWinds(torch.utils.data.Dataset):
-    """
-    Extended dataset that computes physical winds for paradis architecture.
+    """Extended dataset that computes physical winds for the PARADIS architecture.
 
-    This dataset wraps PdeDataset and computes physical winds (u, v) from the
-    spectral vorticity and divergence using the getuv method. The winds are:
+    This dataset wraps ShallowWaterPDEDataset and computes physical winds (u, v)
+    from the spectral vorticity and divergence using the getuv method. The winds are:
     1. Computed from denormalized spectral coefficients
-    2. Normalized separately using wind-specific statistics
+    2. Normalized separately using wind-specific statistics derived from 100 random ICs
     """
 
     def __init__(
@@ -17,20 +17,16 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         dt,
         nsteps,
         dims=(384, 768),
-        grid="equiangular",
-        pde="shallow water equations",
         initial_condition="random",
         num_examples=32,
         device=torch.device("cpu"),
         normalize=True,
         stream=None,
     ):
-        self.base_dataset = PdeDataset(
+        self.base_dataset = ShallowWaterPDEDataset(
             dt=dt,
             nsteps=nsteps,
             dims=dims,
-            grid=grid,
-            pde=pde,
             initial_condition=initial_condition,
             num_examples=num_examples,
             device=device,
@@ -41,8 +37,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         self.solver = self.base_dataset.solver
         self.nlat = self.base_dataset.nlat
         self.nlon = self.base_dataset.nlon
-        # FIX: Use the 'grid' argument directly instead of accessing it from base_dataset
-        self.grid = grid
+        self.grid = "equiangular"  # ShallowWaterSolver always uses equiangular
         self.nsteps = self.base_dataset.nsteps
         self.normalize = normalize
         self.device = device
@@ -55,7 +50,11 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
             self._compute_wind_statistics()
 
     def _compute_wind_statistics(self, num_samples=100):
-        """Compute mean and variance for wind normalization."""
+        """Compute mean and variance for wind normalization.
+
+        Uses 100 random initial conditions rather than a single sample so that
+        the statistics are stable across the range of flows seen during training.
+        """
         wind_samples = []
 
         with torch.no_grad():
@@ -76,7 +75,6 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         self.wind_var = torch.var(wind_samples, dim=(0, 2, 3), keepdim=True).reshape(
             2, 1, 1
         )
-
         self.wind_var = torch.maximum(
             self.wind_var, torch.ones_like(self.wind_var) * 1e-8
         )

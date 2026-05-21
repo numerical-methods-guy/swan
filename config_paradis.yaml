@@ -6,32 +6,67 @@ experiment:
 data:
   nlat: 128
   nlon: 256
-  dt: 1800              # Time step for the model (30 mins)
-  dt_solver: 150        # Time step for the underlying solver
+  dt: 60               # Time step for the model
+  dt_solver: 60        # Time step for the underlying solver
   batch_size: 4
   num_workers: 0        # Set to 0 if dataset generation issues occur
-  grid: "equiangular"  # PARADIS requires equiangular grid
+  grid: "equiangular"   # PARADIS requires equiangular grid
   num_train_examples: 512
   num_val_examples: 64
 
+loss:
+  loss_function: "reversed_huber"   # Options: "reversed_huber", "mse", "mae, "amse"
+  delta_loss: 1.0                   # Threshold for the reversed Huber loss
+
 model:
   paradis:
-    hidden_dim: 16      # Latent space dimension
-    num_layers: 4       # Number of ADR (Advection-Diffusion-Reaction) layers
-    num_encoder_layers: 1  # Number of layers in input projection
-    num_vels: 6         # Number of velocity channels
-    diffusion_size: 10  # Hidden dimension for diffusion operator
-    reaction_size: 7    # Hidden dimension for reaction operator
-    base_dt: 1800       # Base time step (same as data.dt)
-    interpolation: "bicubic"  # Interpolation method: "bilinear" or "bicubic"
-    bias_channels: 2     # Number of learned bias channels
+    # --- Top-level model parameters ---
+    hidden_dim: 32        # cfg.model.latent_size in upstream
+    num_layers: 4         # Number of ADR layers
+    num_vels: 6           # cfg.model.velocity_vectors in upstream
+    base_dt: 60           # Must match data.dt; cfg.model.base_dt in upstream
+    interpolation: "bicubic"  # cfg.model.adv_interpolation in upstream; "bilinear" or "bicubic"
+    bias_channels: 2      # cfg.model.bias_channels in upstream
+    activation: "SiLU"    # cfg.model.activation in upstream; "SiLU" or "GELU"
+
+    # --- Sub-block architecture (cfg.model.physblock in upstream) ---
+    # layers: sequence of block types applied in order
+    # hidden_dim: width of intermediate channels between layers (0 = use input/output dim)
+    physblock:
+      input_proj:
+        layers: ["SepConv", "CLinear"]
+        hidden_dim: 32
+      velocity_net:
+        layers: ["SepConv"]
+        hidden_dim: 32
+      diffusion:
+        layers: ["SepConv"]
+        hidden_dim: 16
+      reaction:
+        layers: ["CLinear", "CLinear"]
+        hidden_dim: 16
+      output_proj:
+        layers: ["SepConv", "CLinear"]
+        hidden_dim: 32
+      advection:
+        down_projection:
+          layers: ["CLinear"]
+          hidden_dim: 0
+        up_projection:
+          layers: ["SepConv"]
+          hidden_dim: 0
 
 training:
-  learning_rate: 1.0e-3
-  finetune_learning_rate: 1.0e-4
-  pretrain_epochs: 100
+  learning_rate: 1.0e-2
+  finetune_learning_rate: 1.0e-3
+  pretrain_epochs: 25
   finetune_epochs: 0
   nfuture: 1
   amp_mode: "none"      # Options: "none", "fp16", "bf16"
   log_every_n_steps: 10
   save_dir: "./logs"
+  gradient_checkpointing: false  # cfg.compute.gradient_checkpointing in upstream
+  # Deterministic LR schedule: decay by lr_gamma at each milestone epoch.
+  # Remove these two keys to fall back to ReduceLROnPlateau.
+  lr_milestones: [10, 16]
+  lr_gamma: 0.5

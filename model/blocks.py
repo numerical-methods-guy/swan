@@ -6,7 +6,7 @@ from typing import Union, Type, Tuple
 import torch
 from torch import nn
 
-from paradis.padding import GeoCyclicPadding
+from model.padding import GeoCyclicPadding
 
 """
     simple_blocks: Wrapper file to consolidate simple NN layers, defined as those that do
@@ -27,6 +27,30 @@ from paradis.padding import GeoCyclicPadding
     silently ignored. Some modules impose stricter requirements and will assert/check
     parameter values (e.g., FlatConv requires input_dim == output_dim).
 """
+
+
+def init_conv2d_default(conv: nn.Conv2d, *, scale: float = 1.0) -> None:
+    nn.init.kaiming_normal_(conv.weight, mode="fan_in", nonlinearity="relu")
+    if scale != 1.0:
+        with torch.no_grad():
+            conv.weight.mul_(scale)
+    if conv.bias is not None:
+        nn.init.constant_(conv.bias, 0.0)
+
+
+def init_module_convs(m: nn.Module, *, last_conv_scale: float = 1.0) -> None:
+    convs = []
+    for module in m.modules():
+        # Skip entire GlobalBias subtrees
+        if isinstance(module, GlobalBias):
+            continue
+
+        if isinstance(module, nn.Conv2d):
+            convs.append(module)
+
+    for i, conv in enumerate(convs):
+        scale = last_conv_scale if (i == len(convs) - 1) else 1.0
+        init_conv2d_default(conv, scale=scale)
 
 
 class CLinear(nn.Module):
@@ -93,35 +117,84 @@ class ChannelNorm(nn.Module):
         return x
 
 
+# LowRankBias -- low-rank factorized bias operator
 class GlobalBias(nn.Module):
-    """Learned bias operator with geophysical features."""
+    """
+    LowRankBias -- construct a low-rank factorized bias operator that reduces
+    the number of parameters while maintaining expressiveness through separable
+    rank-K decomposition.
+
+    Uses factors:
+    - A ∈ R^{C_in×K} (per-channel coefficients)
+    - U ∈ R^{K×H} (latitudinal factors)
+    - V ∈ R^{K×W} (longitudinal factors)
+
+    The bias map is computed as: y_c = ∑_{k=1}^K A_{ck} u_k v_k^T
+    With optional projection to output channels.
+
+    Parameters: K*(C_in + H + W) vs C_in*H*W for GlobalBias
+    """
 
     def __init__(
         self,
         input_dim: int,
         output_dim: int,
-        mesh_size: tuple,
-        bias: bool = True,
-        kernel_size: int = 0,
+        *,
+        bias: bool = True,  # Not used (would be redundant)
+        kernel_size: int = 0,  # Not used
+        mesh_size: Tuple[int, int],  # required
+        rank: int = 128,  # K - rank of the factorization
     ):
         super().__init__()
-        self.bias = nn.Parameter(
-            torch.zeros(((input_dim,) + mesh_size)), requires_grad=True
-        )
 
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.rank = rank
+        self.height, self.width = mesh_size
+
+        # Factor matrices
+        self.A = nn.Parameter(torch.zeros(input_dim, rank), requires_grad=True)
+        self.U = nn.Parameter(torch.zeros(rank, self.height), requires_grad=True)
+        self.V = nn.Parameter(torch.zeros(rank, self.width), requires_grad=True)
+
+        with torch.no_grad():
+            nn.init.normal_(self.A, mean=0.0, std=1e-3)
+            nn.init.normal_(self.U, mean=0.0, std=1e-3)
+            nn.init.normal_(self.V, mean=0.0, std=1e-3)
+
+        # Optional projection to output channels
         if input_dim != output_dim:
             self.projection = nn.Linear(input_dim, output_dim, bias=False)
         else:
             self.projection = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.projection is None:
-            y = self.bias
-        else:
-            y = torch.einsum("iab,ji->jab", self.bias, self.projection.weight)
+        # bias_maps: [C_in, H, W]
+        bias_maps = torch.einsum("ck,kh,kw->chw", self.A, self.U, self.V)
 
-        x = x + y[..., :, :, :]
-        return x
+        if self.projection is not None:
+            # [C_out, H, W]
+            bias_maps = torch.einsum("oc,chw->ohw", self.projection.weight, bias_maps)
+
+        # x: [B, C_out, H, W] (or [B, C_in, H, W] if no projection)
+        return x + bias_maps.unsqueeze(0)
+
+
+class PhysicalDownsample(nn.Module):
+    """Downsample a physical field to an exact target grid.
+
+    Uses average pooling for anti-aliasing, then interpolates to the exact target
+    size to handle 2N-1 latitude grids cleanly.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.pool = nn.AvgPool2d(kernel_size=5, stride=4, count_include_pad=False)
+        self.padding = GeoCyclicPadding(2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.padding(x)
+        return self.pool(x)
 
 
 ActivationType = Type[nn.Module]
@@ -223,3 +296,4 @@ class GMBlock(nn.Sequential):
             layer_in_size = layer_out_size
 
         super().__init__(OrderedDict(blocks))
+        init_module_convs(self, last_conv_scale=0.1)

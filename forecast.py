@@ -1,4 +1,5 @@
 import os
+import time
 import argparse
 import yaml
 import numpy as np
@@ -7,21 +8,16 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
 import torch
-import torch.nn as nn
 import pytorch_lightning as pl
 
-from torch_harmonics import RealSHT
-from torch_harmonics.examples import PdeDataset
 from torch_harmonics.examples.losses import (
     SquaredL2LossS2,
     L1LossS2,
     L2LossS2,
     W11LossS2,
 )
-from torch_harmonics.examples.models.sfno import SphericalFourierNeuralOperator
-from torch_harmonics.examples.models.s2transformer import SphericalTransformer
 
-from paradis import ParadisModel
+from model.paradis import Paradis
 from pde_dataset_with_winds import PdeDatasetWithWinds
 
 
@@ -33,7 +29,7 @@ def load_config(config_path):
 
 
 class SWELightningModule(pl.LightningModule):
-    """Unified Lightning Module for loading SFNO, Transformer, and Paradis models."""
+    """Lightning module for loading a PARADIS checkpoint."""
 
     def __init__(self, config):
         super().__init__()
@@ -43,100 +39,32 @@ class SWELightningModule(pl.LightningModule):
         self.nlat = config["data"]["nlat"]
         self.nlon = config["data"]["nlon"]
         self.grid = config["data"]["grid"]
-        self.model_type = config["experiment"]["model_type"]
 
-        # PARADIS always uses winds
-        self.use_winds = self.model_type == "paradis"
-
-        if self.model_type == "sfno":
-            self.model = self._create_sfno_model()
-        elif self.model_type == "transformer":
-            self.model = self._create_transformer_model()
-        elif self.model_type == "paradis":
-            self.model = self._create_paradis_model()
-        else:
-            raise ValueError(f"Unknown model type: {self.model_type}")
+        if "paradis" not in config["model"]:
+            raise ValueError(
+                "PARADIS model config not found. Add a 'model.paradis' section to your config."
+            )
+        self.model = Paradis(config)
 
         self.loss_fn = SquaredL2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l1 = L1LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_l2 = L2LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
         self.metric_w11 = W11LossS2(nlat=self.nlat, nlon=self.nlon, grid=self.grid)
 
-    def _create_sfno_model(self):
-        """Create SFNO model."""
-        if "sfno" not in self.config["model"]:
-            raise ValueError(
-                "SFNO model config not found. Use config_sfno.yaml or add 'model.sfno' section."
-            )
-
-        model_config = self.config["model"]["sfno"]
-        return SphericalFourierNeuralOperator(
-            img_size=(self.nlat, self.nlon),
-            grid=self.grid,
-            grid_internal=self.grid,
-            scale_factor=model_config["scale_factor"],
-            in_chans=3,
-            out_chans=3,
-            embed_dim=model_config["embed_dim"],
-            num_layers=model_config["num_layers"],
-            normalization_layer=model_config["normalization_layer"],
-            use_mlp=model_config["use_mlp"],
-            mlp_ratio=model_config["mlp_ratio"],
-            drop_rate=model_config["dropout"],
-            hard_thresholding_fraction=model_config["hard_thresholding_fraction"],
-            residual_prediction=True,
-        )
-
-    def _create_transformer_model(self):
-        """Create Spherical Transformer model."""
-        if "transformer" not in self.config["model"]:
-            raise ValueError(
-                "Transformer model config not found. Use config_transformer.yaml or add 'model.transformer' section."
-            )
-
-        model_config = self.config["model"]["transformer"]
-        return SphericalTransformer(
-            img_size=(self.nlat, self.nlon),
-            grid=self.grid,
-            scale_factor=model_config["scale_factor"],
-            in_chans=3,
-            out_chans=3,
-            embed_dim=model_config["embed_dim"],
-            num_layers=model_config["num_layers"],
-            num_heads=model_config["num_heads"],
-            use_mlp=model_config["use_mlp"],
-            mlp_ratio=model_config["mlp_ratio"],
-            drop_rate=model_config["dropout"],
-            drop_path_rate=model_config["drop_path"],
-            pos_embed=model_config["pos_embed"],
-        )
-
-    def _create_paradis_model(self):
-        """Create PARADIS model."""
-        if "paradis" not in self.config["model"]:
-            raise ValueError(
-                "PARADIS model config not found. Use config_paradis.yaml or add 'model.paradis' section."
-            )
-
-        return ParadisModel(self.config)
-
-    def forward(self, *args):
-        if self.use_winds:
-            return self.model(args[0], args[1])
-        else:
-            return self.model(args[0])
+    def forward(self, fields, winds):
+        return self.model(fields, winds)
 
 
 def compute_energy_spectra(fields, sht):
-    """
-    Compute energy spectra for shallow water equation fields.
+    """Compute energy spectra for shallow water equation fields.
 
     Args:
-        fields: Tensor of shape (batch, 3, nlat, nlon) containing [h, vorticity, divergence]
-        sht: RealSHT object for spherical harmonic transforms
+        fields: Tensor of shape (batch, 3, nlat, nlon) containing [h, vorticity, divergence].
+        sht: RealSHT object for spherical harmonic transforms.
 
     Returns:
-        Dictionary containing power spectra for rotational, divergent, and potential energy
+        Dictionary containing power spectra for rotational, divergent, and potential energy,
+        plus the total and the wavenumber array.
     """
     h = fields[:, 0:1]
     vort = fields[:, 1:2]
@@ -192,16 +120,11 @@ def compute_energy_spectra(fields, sht):
 
     total_spectrum = rot_spectrum + div_spectrum + pot_spectrum
 
-    rot_spectrum = rot_spectrum.mean(dim=0)
-    div_spectrum = div_spectrum.mean(dim=0)
-    pot_spectrum = pot_spectrum.mean(dim=0)
-    total_spectrum = total_spectrum.mean(dim=0)
-
     return {
-        "rotational": rot_spectrum.cpu().numpy(),
-        "divergent": div_spectrum.cpu().numpy(),
-        "potential": pot_spectrum.cpu().numpy(),
-        "total": total_spectrum.cpu().numpy(),
+        "rotational": rot_spectrum.mean(dim=0).cpu().numpy(),
+        "divergent": div_spectrum.mean(dim=0).cpu().numpy(),
+        "potential": pot_spectrum.mean(dim=0).cpu().numpy(),
+        "total": total_spectrum.mean(dim=0).cpu().numpy(),
         "wavenumbers": np.arange(max_k),
     }
 
@@ -213,12 +136,8 @@ def plot_energy_spectra(
     fig = plt.figure(figsize=(14, 10))
     gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.3)
 
-    k = pred_spectra["wavenumbers"]
-    k_plot = k[1:]
-
+    k_plot = pred_spectra["wavenumbers"][1:]
     k_ref = np.array([5.0, 50.0])
-    ref_minus3 = 1e4 * k_ref ** (-3.0)
-    ref_minus5_3 = 1e3 * k_ref ** (-5.0 / 3.0)
 
     titles = [
         "Rotational Kinetic Energy",
@@ -230,7 +149,6 @@ def plot_energy_spectra(
 
     for idx, (title, key) in enumerate(zip(titles, keys)):
         ax = fig.add_subplot(gs[idx // 2, idx % 2])
-
         ax.loglog(
             k_plot,
             pred_spectra[key][1:],
@@ -247,40 +165,35 @@ def plot_energy_spectra(
             label="Ground Truth",
             alpha=0.8,
         )
-        ax.loglog(k_ref, ref_minus3, "k:", linewidth=1.5, alpha=0.5, label=r"$k^{-3}$")
         ax.loglog(
-            k_ref, ref_minus5_3, "k-.", linewidth=1.5, alpha=0.5, label=r"$k^{-5/3}$"
+            k_ref,
+            1e4 * k_ref ** (-3.0),
+            "k:",
+            linewidth=1.5,
+            alpha=0.5,
+            label=r"$k^{-3}$",
         )
-
+        ax.loglog(
+            k_ref,
+            1e3 * k_ref ** (-5.0 / 3.0),
+            "k-.",
+            linewidth=1.5,
+            alpha=0.5,
+            label=r"$k^{-5/3}$",
+        )
         ax.set_xlabel("Wavenumber $l$", fontsize=11)
         ax.set_ylabel("Power Spectrum", fontsize=11)
         ax.set_title(f"{title} (t={step})", fontsize=12, fontweight="bold")
         ax.grid(True, alpha=0.3, which="both")
-        ax.legend(loc="lower left", fontsize=9)
+        ax.legend(loc="upper left", fontsize=9)
         ax.set_xlim([1, k_plot[-1]])
 
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
 
 
-def autoregressive_inference_with_winds(
-    model,
-    dataset,
-    loss_fn,
-    metrics_dict,
-    output_dir,
-    nsteps,
-    model_name="Model",
-    autoreg_steps=10,
-    plot_channel=0,
-    save_plots=True,
-    spectral_analysis=True,
-    device=torch.device("cpu"),
-):
-    """Perform autoregressive inference and generate forecast plots."""
-    model.eval()
-    model.to(device)
-
+def _move_dataset_to_device(dataset, device):
+    """Move all dataset solver and normalization buffers to the target device."""
     dataset.solver = dataset.solver.to(device)
     dataset.sht = dataset.sht.to(device)
     dataset.inp_mean = dataset.inp_mean.to(device)
@@ -288,126 +201,219 @@ def autoregressive_inference_with_winds(
     dataset.wind_mean = dataset.wind_mean.to(device)
     dataset.wind_var = dataset.wind_var.to(device)
 
-    os.makedirs(output_dir, exist_ok=True)
-    if spectral_analysis:
-        spectral_dir = output_dir
-        os.makedirs(spectral_dir, exist_ok=True)
 
-    metrics_data = {key: [] for key in metrics_dict.keys()}
-    metrics_data["loss"] = []
+def _get_ic(solver, ic_type, mach=0.2):
+    """Return a spectral initial condition from the solver.
 
+    Args:
+        solver: ShallowWaterSolver instance.
+        ic_type: ``"random"`` or ``"galewsky"``.
+        mach: Mach number passed to random_initial_condition (ignored for galewsky).
+    """
+    if ic_type == "random":
+        return solver.random_initial_condition(mach=mach)
+    elif ic_type == "galewsky":
+        return solver.galewsky_initial_condition()
+    else:
+        raise ValueError(
+            f"Unknown ic_type '{ic_type}'. Expected 'random' or 'galewsky'."
+        )
+
+
+def _run_single_ic_inference(
+    model,
+    dataset,
+    loss_fn,
+    metrics_dict,
+    nsteps,
+    autoreg_steps,
+    device,
+    ic_type="random",
+    output_dir=None,
+    ic_index=None,
+    plot_channel=0,
+    save_plots=True,
+    spectral_analysis=True,
+    model_name="Model",
+    output_freq=1,
+):
+    """Run one autoregressive rollout from a single initial condition.
+
+    The ML model and the reference numerical solver are each timed over the
+    full rollout horizon independently, with CUDA synchronization guards on GPU
+    so the reported times are accurate. Per-step metrics and plot/tensor outputs
+    are collected in a second pass to avoid I/O polluting the timing loop.
+
+    Args:
+        model: The PARADIS LightningModule in eval mode.
+        dataset: PdeDatasetWithWinds instance with all buffers on the target device.
+        loss_fn: Spherical L2 loss.
+        metrics_dict: Dict mapping metric name to callable.
+        nsteps: Number of solver substeps per model timestep.
+        autoreg_steps: Number of autoregressive steps to roll out.
+        device: Torch device.
+        ic_type: Initial condition type — ``"random"`` (mach=0.2) or ``"galewsky"``.
+        output_dir: If provided, tensors/plots/spectra are saved here.
+        ic_index: IC index used as a filename prefix when output_dir is set.
+        plot_channel: Field channel to visualise (0=h, 1=vorticity, 2=divergence).
+        save_plots: Whether to save comparison plots.
+        spectral_analysis: Whether to save spectral energy plots.
+        model_name: Label used in plot titles.
+        output_freq: Save plots and tensors every this many steps (step 0 always saved).
+
+    Returns:
+        step_metrics: Dict mapping metric name to list of per-step values.
+        ml_time: Wall-clock seconds for the ML rollout.
+        solver_time: Wall-clock seconds for the reference solver rollout.
+    """
     pad_width = len(str(autoreg_steps))
+    prefix = f"ic{ic_index:03d}_" if ic_index is not None else ""
 
-    print(f"Starting Autoregressive Inference for {autoreg_steps} steps...")
+    inp_mean = dataset.inp_mean
+    inp_var = dataset.inp_var
+    wind_mean = dataset.wind_mean
+    wind_var = dataset.wind_var
 
-    with torch.no_grad():
-        ic = dataset.solver.random_initial_condition(mach=0.2)
+    # --- Timing pass: ML model ---
+    ic = _get_ic(dataset.solver, ic_type)
 
-        inp_mean = dataset.inp_mean
-        inp_var = dataset.inp_var
-        wind_mean = dataset.wind_mean
-        wind_var = dataset.wind_var
+    prd_fields = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
+    prd_fields = prd_fields.unsqueeze(0)
+    prd_winds_raw = dataset.solver.getuv(ic[1:])
+    prd_winds = (prd_winds_raw - wind_mean) / torch.sqrt(wind_var)
+    prd_winds = prd_winds.unsqueeze(0)
 
-        prd_fields = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
-        prd_fields = prd_fields.unsqueeze(0)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    ml_start = time.perf_counter()
 
-        prd_winds = dataset.solver.getuv(ic[1:])
-        prd_winds = (prd_winds - wind_mean) / torch.sqrt(wind_var)
+    for _ in range(autoreg_steps):
+        prd_fields = model(prd_fields, prd_winds)
+        prd_unnorm = prd_fields * torch.sqrt(inp_var) + inp_mean
+        prd_spec = dataset.sht(prd_unnorm.squeeze(0))
+        prd_uv_grid = dataset.solver.getuv(prd_spec[1:])
+        prd_winds = (prd_uv_grid - wind_mean) / torch.sqrt(wind_var)
         prd_winds = prd_winds.unsqueeze(0)
 
-        uspec = ic.clone()
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    ml_time = time.perf_counter() - ml_start
 
-        prd_uv_grid = dataset.solver.getuv(ic[1:])
-        outputs = {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid.cpu()}
+    # --- Timing pass: reference numerical solver ---
+    ref_uspec = ic.clone()
+
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    solver_start = time.perf_counter()
+
+    for _ in range(autoreg_steps):
+        ref_uspec = dataset.solver.timestep(ref_uspec, nsteps)
+
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    solver_time = time.perf_counter() - solver_start
+
+    # --- Metrics and output pass ---
+    ic = _get_ic(dataset.solver, ic_type)
+    uspec = ic.clone()
+
+    prd_fields = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
+    prd_fields = prd_fields.unsqueeze(0)
+    prd_uv_grid_init = dataset.solver.getuv(ic[1:])
+    prd_winds = (prd_uv_grid_init - wind_mean) / torch.sqrt(wind_var)
+    prd_winds = prd_winds.unsqueeze(0)
+
+    step_metrics = {key: [] for key in metrics_dict.keys()}
+    step_metrics["loss"] = []
+
+    # Step 0 (initial condition) is always saved regardless of output_freq.
+    if output_dir is not None:
+        init_outputs = {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid_init.cpu()}
         torch.save(
-            outputs, os.path.join(output_dir, f"prediction_{0:0{pad_width}d}.pt")
+            init_outputs,
+            os.path.join(output_dir, f"{prefix}prediction_{0:0{pad_width}d}.pt"),
         )
-        torch.save(outputs, os.path.join(output_dir, f"truth_{0:0{pad_width}d}.pt"))
+        torch.save(
+            init_outputs,
+            os.path.join(output_dir, f"{prefix}truth_{0:0{pad_width}d}.pt"),
+        )
 
         if save_plots:
             fig = plt.figure(figsize=(6, 5))
-            pred_data = prd_fields[0, plot_channel].cpu().numpy()
             ax = fig.add_subplot(1, 1, 1)
-            im = ax.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
+            im = ax.imshow(
+                prd_fields[0, plot_channel].cpu().numpy(),
+                vmin=-4,
+                vmax=4,
+                cmap="twilight_shifted",
+            )
             ax.set_title("Initial Condition (t=0)", fontsize=12, fontweight="bold")
             ax.axis("off")
             fig.subplots_adjust(bottom=0.15)
-            cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
-            fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
-            fname = f"comparison_{0:0{pad_width}d}.png"
-            plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
+            fig.colorbar(
+                im, cax=fig.add_axes([0.15, 0.05, 0.7, 0.03]), orientation="horizontal"
+            )
+            plt.savefig(
+                os.path.join(output_dir, f"{prefix}comparison_{0:0{pad_width}d}.png"),
+                dpi=150,
+                bbox_inches="tight",
+            )
             plt.close()
 
         if spectral_analysis:
-            pred_spectra = compute_energy_spectra(prd_fields, dataset.sht)
-            truth_spectra = compute_energy_spectra(prd_fields, dataset.sht)
-            plot_path = os.path.join(spectral_dir, f"spectra_{0:0{pad_width}d}.png")
-            plot_energy_spectra(pred_spectra, truth_spectra, 0, plot_path, model_name)
-
-        for step in range(1, autoreg_steps + 1):
-            prd_fields = model(prd_fields, prd_winds)
-
-            prd_unnorm = prd_fields * torch.sqrt(inp_var) + inp_mean
-            prd_spec = dataset.sht(prd_unnorm.squeeze(0))
-
-            prd_uv_grid = dataset.solver.getuv(prd_spec[1:])
-
-            prd_winds = (prd_uv_grid - wind_mean) / torch.sqrt(wind_var)
-            prd_winds = prd_winds.unsqueeze(0)
-
-            uspec = dataset.solver.timestep(uspec, nsteps)
-            ref_grid = dataset.solver.spec2grid(uspec)
-            ref_uv_grid = dataset.solver.getuv(uspec[1:])
-
-            ref_fields = (ref_grid - inp_mean) / torch.sqrt(inp_var)
-            ref_fields = ref_fields.unsqueeze(0)
-
-            pred_outputs = {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid.cpu()}
-            truth_outputs = {"fields": ref_fields[0].cpu(), "winds": ref_uv_grid.cpu()}
-            torch.save(
-                pred_outputs,
-                os.path.join(output_dir, f"prediction_{step:0{pad_width}d}.pt"),
-            )
-            torch.save(
-                truth_outputs,
-                os.path.join(output_dir, f"truth_{step:0{pad_width}d}.pt"),
+            init_spectra = compute_energy_spectra(prd_fields, dataset.sht)
+            plot_energy_spectra(
+                init_spectra,
+                init_spectra,
+                0,
+                os.path.join(output_dir, f"{prefix}spectra_{0:0{pad_width}d}.png"),
+                model_name,
             )
 
-            step_metrics = {}
-            for name, metric_fn in metrics_dict.items():
-                val = metric_fn(prd_fields, ref_fields).item()
-                metrics_data[name].append(val)
-                step_metrics[name] = val
+    for step in range(1, autoreg_steps + 1):
+        prd_fields = model(prd_fields, prd_winds)
+        prd_unnorm = prd_fields * torch.sqrt(inp_var) + inp_mean
+        prd_spec = dataset.sht(prd_unnorm.squeeze(0))
+        prd_uv_grid = dataset.solver.getuv(prd_spec[1:])
+        prd_winds = (prd_uv_grid - wind_mean) / torch.sqrt(wind_var)
+        prd_winds = prd_winds.unsqueeze(0)
 
-            loss_val = loss_fn(prd_fields, ref_fields).item()
-            metrics_data["loss"].append(loss_val)
-            step_metrics["loss"] = loss_val
+        uspec = dataset.solver.timestep(uspec, nsteps)
+        ref_grid = dataset.solver.spec2grid(uspec)
+        ref_uv_grid = dataset.solver.getuv(uspec[1:])
+        ref_fields = (ref_grid - inp_mean) / torch.sqrt(inp_var)
+        ref_fields = ref_fields.unsqueeze(0)
 
-            metrics_str = ", ".join([f"{k}: {v:.6f}" for k, v in step_metrics.items()])
-            print(f"Step {step}: {metrics_str}")
+        for name, metric_fn in metrics_dict.items():
+            step_metrics[name].append(metric_fn(prd_fields, ref_fields).item())
+        step_metrics["loss"].append(loss_fn(prd_fields, ref_fields).item())
+
+        # Only write plots and tensors on steps that are multiples of output_freq.
+        if output_dir is not None and step % output_freq == 0:
+            torch.save(
+                {"fields": prd_fields[0].cpu(), "winds": prd_uv_grid.cpu()},
+                os.path.join(output_dir, f"{prefix}prediction_{step:0{pad_width}d}.pt"),
+            )
+            torch.save(
+                {"fields": ref_fields[0].cpu(), "winds": ref_uv_grid.cpu()},
+                os.path.join(output_dir, f"{prefix}truth_{step:0{pad_width}d}.pt"),
+            )
 
             if save_plots:
-                fig = plt.figure(figsize=(18, 5))
-
                 pred_data = prd_fields[0, plot_channel].cpu().numpy()
                 truth_data = ref_fields[0, plot_channel].cpu().numpy()
                 error_data = pred_data - truth_data
-
-                # Prediction
+                fig = plt.figure(figsize=(18, 5))
                 ax1 = fig.add_subplot(1, 3, 1)
                 im1 = ax1.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
                 ax1.set_title(f"Prediction (t={step})", fontsize=12, fontweight="bold")
                 ax1.axis("off")
-
-                # Ground Truth
                 ax2 = fig.add_subplot(1, 3, 2)
                 im2 = ax2.imshow(truth_data, vmin=-4, vmax=4, cmap="twilight_shifted")
                 ax2.set_title(
                     f"Ground Truth (t={step})", fontsize=12, fontweight="bold"
                 )
                 ax2.axis("off")
-
-                # Error
                 ax3 = fig.add_subplot(1, 3, 3)
                 error_max = max(abs(error_data.min()), abs(error_data.max()))
                 im3 = ax3.imshow(
@@ -415,40 +421,82 @@ def autoregressive_inference_with_winds(
                 )
                 ax3.set_title(f"Error (t={step})", fontsize=12, fontweight="bold")
                 ax3.axis("off")
-
-                # Add colorbars
                 fig.subplots_adjust(bottom=0.15, wspace=0.3)
-                cbar_ax1 = fig.add_axes([0.08, 0.08, 0.22, 0.03])
-                fig.colorbar(im1, cax=cbar_ax1, orientation="horizontal")
-                cbar_ax2 = fig.add_axes([0.39, 0.08, 0.22, 0.03])
-                fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal")
-                cbar_ax3 = fig.add_axes([0.70, 0.08, 0.22, 0.03])
-                fig.colorbar(im3, cax=cbar_ax3, orientation="horizontal")
-
-                fname = f"comparison_{step:0{pad_width}d}.png"
+                fig.colorbar(
+                    im1,
+                    cax=fig.add_axes([0.08, 0.08, 0.22, 0.03]),
+                    orientation="horizontal",
+                )
+                fig.colorbar(
+                    im2,
+                    cax=fig.add_axes([0.39, 0.08, 0.22, 0.03]),
+                    orientation="horizontal",
+                )
+                fig.colorbar(
+                    im3,
+                    cax=fig.add_axes([0.70, 0.08, 0.22, 0.03]),
+                    orientation="horizontal",
+                )
                 plt.savefig(
-                    os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
+                    os.path.join(
+                        output_dir, f"{prefix}comparison_{step:0{pad_width}d}.png"
+                    ),
+                    dpi=150,
+                    bbox_inches="tight",
                 )
                 plt.close()
 
             if spectral_analysis:
                 pred_spectra = compute_energy_spectra(prd_fields, dataset.sht)
                 truth_spectra = compute_energy_spectra(ref_fields, dataset.sht)
-                plot_path = os.path.join(
-                    spectral_dir, f"spectra_{step:0{pad_width}d}.png"
-                )
                 plot_energy_spectra(
-                    pred_spectra, truth_spectra, step, plot_path, model_name
+                    pred_spectra,
+                    truth_spectra,
+                    step,
+                    os.path.join(
+                        output_dir, f"{prefix}spectra_{step:0{pad_width}d}.png"
+                    ),
+                    model_name,
                 )
 
+    return step_metrics, ml_time, solver_time
+
+
+def _aggregate_multi_ic_metrics(all_step_metrics, all_ml_times, all_solver_times):
+    """Aggregate per-IC step-metric lists into a flat summary dict.
+
+    Per-step values are flattened across all ICs before computing mean/std so
+    that the reported statistics reflect both temporal and IC-to-IC variability.
+    Timing statistics include mean speedup of the ML model over the numerical solver.
+
+    Args:
+        all_step_metrics: List of per-IC dicts mapping metric name to list of per-step floats.
+        all_ml_times: List of per-IC ML rollout wall-clock times in seconds.
+        all_solver_times: List of per-IC numerical solver wall-clock times in seconds.
+
+    Returns:
+        Dict with {metric}_mean / {metric}_std entries plus timing statistics.
+    """
     summary = {}
-    for key, values in metrics_data.items():
-        if len(values) > 0:
-            summary[f"{key}_mean"] = np.mean(values)
-            summary[f"{key}_std"] = np.std(values)
-        else:
-            summary[f"{key}_mean"] = float("nan")
-            summary[f"{key}_std"] = float("nan")
+
+    for key in all_step_metrics[0].keys():
+        all_values = [v for ic in all_step_metrics for v in ic[key]]
+        summary[f"{key}_mean"] = (
+            float(np.mean(all_values)) if all_values else float("nan")
+        )
+        summary[f"{key}_std"] = (
+            float(np.std(all_values)) if all_values else float("nan")
+        )
+
+    summary["ml_time_mean"] = float(np.mean(all_ml_times))
+    summary["ml_time_std"] = float(np.std(all_ml_times))
+    summary["solver_time_mean"] = float(np.mean(all_solver_times))
+    summary["solver_time_std"] = float(np.std(all_solver_times))
+    summary["speedup_mean"] = (
+        summary["solver_time_mean"] / summary["ml_time_mean"]
+        if summary["ml_time_mean"] > 0
+        else float("nan")
+    )
 
     return summary
 
@@ -462,175 +510,90 @@ def autoregressive_inference(
     nsteps,
     model_name="Model",
     autoreg_steps=10,
+    num_ics=1,
+    ic_type="random",
     plot_channel=0,
     save_plots=True,
     spectral_analysis=True,
     device=torch.device("cpu"),
+    output_freq=1,
 ):
-    """Perform autoregressive inference for standard models (SFNO, Transformer)."""
+    """Perform autoregressive inference over one or more initial conditions.
+
+    Plots, tensors, and spectral analyses are written only for the first IC to
+    avoid excessive disk usage. Per-IC timing is printed to stdout and aggregated
+    in the returned summary.
+
+    For the Galewsky test case (``ic_type="galewsky"``) the solver has a single
+    deterministic IC, so ``num_ics`` is forced to 1.
+
+    Args:
+        model: The PARADIS LightningModule.
+        dataset: PdeDatasetWithWinds instance.
+        loss_fn: Spherical L2 loss.
+        metrics_dict: Dict mapping metric name to callable.
+        output_dir: Directory to save results.
+        nsteps: Number of solver substeps per model timestep.
+        model_name: Label used in plot titles.
+        autoreg_steps: Number of autoregressive steps per rollout.
+        num_ics: Number of initial conditions to average over (forced to 1 for galewsky).
+        ic_type: ``"random"`` or ``"galewsky"``.
+        plot_channel: Field channel to visualise.
+        save_plots: Whether to save comparison plots.
+        spectral_analysis: Whether to save spectral energy plots.
+        device: Torch device.
+        output_freq: Save plots and tensors every this many steps (step 0 always saved).
+
+    Returns:
+        Summary dict with aggregated mean/std metrics and timing statistics.
+    """
     model.eval()
     model.to(device)
-
-    dataset.solver = dataset.solver.to(device)
-    dataset.sht = dataset.sht.to(device)
-    dataset.inp_mean = dataset.inp_mean.to(device)
-    dataset.inp_var = dataset.inp_var.to(device)
-
+    _move_dataset_to_device(dataset, device)
     os.makedirs(output_dir, exist_ok=True)
-    if spectral_analysis:
-        spectral_dir = output_dir
-        os.makedirs(spectral_dir, exist_ok=True)
 
-    metrics_data = {key: [] for key in metrics_dict.keys()}
-    metrics_data["loss"] = []
+    if ic_type == "galewsky":
+        num_ics = 1
 
-    pad_width = len(str(autoreg_steps))
+    all_step_metrics = []
+    all_ml_times = []
+    all_solver_times = []
 
-    print(f"Starting Autoregressive Inference for {autoreg_steps} steps...")
+    print(
+        f"Starting Autoregressive Inference ({autoreg_steps} steps, {num_ics} IC(s), "
+        f"ic_type={ic_type}, output_freq={output_freq})..."
+    )
 
     with torch.no_grad():
-        ic = dataset.solver.random_initial_condition(mach=0.2)
-
-        inp_mean = dataset.inp_mean
-        inp_var = dataset.inp_var
-
-        prd = (dataset.solver.spec2grid(ic) - inp_mean) / torch.sqrt(inp_var)
-        prd = prd.unsqueeze(0)
-
-        uspec = ic.clone()
-
-        prd_uv_grid = dataset.solver.getuv(ic[1:])
-
-        outputs = {"fields": prd[0].cpu(), "winds": prd_uv_grid.cpu()}
-        torch.save(
-            outputs, os.path.join(output_dir, f"prediction_{0:0{pad_width}d}.pt")
-        )
-        torch.save(outputs, os.path.join(output_dir, f"truth_{0:0{pad_width}d}.pt"))
-
-        if save_plots:
-            fig = plt.figure(figsize=(6, 5))
-            pred_data = prd[0, plot_channel].cpu().numpy()
-            ax = fig.add_subplot(1, 1, 1)
-            im = ax.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-            ax.set_title("Initial Condition (t=0)", fontsize=12, fontweight="bold")
-            ax.axis("off")
-            fig.subplots_adjust(bottom=0.15)
-            cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
-            fig.colorbar(im, cax=cbar_ax, orientation="horizontal")
-            fname = f"comparison_{0:0{pad_width}d}.png"
-            plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
-            plt.close()
-
-        if spectral_analysis:
-            pred_spectra = compute_energy_spectra(prd, dataset.sht)
-            truth_spectra = compute_energy_spectra(prd, dataset.sht)
-            plot_path = os.path.join(spectral_dir, f"spectra_{0:0{pad_width}d}.png")
-            plot_energy_spectra(pred_spectra, truth_spectra, 0, plot_path, model_name)
-
-        for step in range(1, autoreg_steps + 1):
-            prd = model(prd)
-
-            prd_unnorm = prd * torch.sqrt(inp_var) + inp_mean
-            prd_spec = dataset.sht(prd_unnorm.squeeze(0))
-            prd_uv_grid = dataset.solver.getuv(prd_spec[1:])
-
-            uspec = dataset.solver.timestep(uspec, nsteps)
-            ref_grid = dataset.solver.spec2grid(uspec)
-
-            ref_uv_grid = dataset.solver.getuv(uspec[1:])
-
-            ref = (ref_grid - inp_mean) / torch.sqrt(inp_var)
-            ref = ref.unsqueeze(0)
-
-            pred_outputs = {"fields": prd[0].cpu(), "winds": prd_uv_grid.cpu()}
-            truth_outputs = {"fields": ref[0].cpu(), "winds": ref_uv_grid.cpu()}
-            torch.save(
-                pred_outputs,
-                os.path.join(output_dir, f"prediction_{step:0{pad_width}d}.pt"),
+        for ic_idx in range(num_ics):
+            print(f"\n--- IC {ic_idx + 1}/{num_ics} ---")
+            step_metrics, ml_time, solver_time = _run_single_ic_inference(
+                model=model,
+                dataset=dataset,
+                loss_fn=loss_fn,
+                metrics_dict=metrics_dict,
+                nsteps=nsteps,
+                autoreg_steps=autoreg_steps,
+                device=device,
+                ic_type=ic_type,
+                output_dir=output_dir if ic_idx == 0 else None,
+                ic_index=ic_idx,
+                plot_channel=plot_channel,
+                save_plots=save_plots and ic_idx == 0,
+                spectral_analysis=spectral_analysis and ic_idx == 0,
+                model_name=model_name,
+                output_freq=output_freq,
             )
-            torch.save(
-                truth_outputs,
-                os.path.join(output_dir, f"truth_{step:0{pad_width}d}.pt"),
-            )
+            all_step_metrics.append(step_metrics)
+            all_ml_times.append(ml_time)
+            all_solver_times.append(solver_time)
 
-            step_metrics = {}
-            for name, metric_fn in metrics_dict.items():
-                val = metric_fn(prd, ref).item()
-                metrics_data[name].append(val)
-                step_metrics[name] = val
+            speedup = solver_time / ml_time if ml_time > 0 else float("nan")
+            print(f"  ML rollout:     {ml_time:.3f}s")
+            print(f"  Solver rollout: {solver_time:.3f}s")
+            print(f"  Speedup:        {speedup:.1f}x")
 
-            loss_val = loss_fn(prd, ref).item()
-            metrics_data["loss"].append(loss_val)
-            step_metrics["loss"] = loss_val
-
-            metrics_str = ", ".join([f"{k}: {v:.6f}" for k, v in step_metrics.items()])
-            print(f"Step {step}: {metrics_str}")
-
-            if save_plots:
-                fig = plt.figure(figsize=(18, 5))
-
-                pred_data = prd[0, plot_channel].cpu().numpy()
-                truth_data = ref[0, plot_channel].cpu().numpy()
-                error_data = pred_data - truth_data
-
-                # Prediction
-                ax1 = fig.add_subplot(1, 3, 1)
-                im1 = ax1.imshow(pred_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-                ax1.set_title(f"Prediction (t={step})", fontsize=12, fontweight="bold")
-                ax1.axis("off")
-
-                # Ground Truth
-                ax2 = fig.add_subplot(1, 3, 2)
-                im2 = ax2.imshow(truth_data, vmin=-4, vmax=4, cmap="twilight_shifted")
-                ax2.set_title(
-                    f"Ground Truth (t={step})", fontsize=12, fontweight="bold"
-                )
-                ax2.axis("off")
-
-                # Error
-                ax3 = fig.add_subplot(1, 3, 3)
-                error_max = max(abs(error_data.min()), abs(error_data.max()))
-                im3 = ax3.imshow(
-                    error_data, vmin=-error_max, vmax=error_max, cmap="RdBu_r"
-                )
-                ax3.set_title(f"Error (t={step})", fontsize=12, fontweight="bold")
-                ax3.axis("off")
-
-                # Add colorbars
-                fig.subplots_adjust(bottom=0.15, wspace=0.3)
-                cbar_ax1 = fig.add_axes([0.08, 0.08, 0.22, 0.03])
-                fig.colorbar(im1, cax=cbar_ax1, orientation="horizontal")
-                cbar_ax2 = fig.add_axes([0.39, 0.08, 0.22, 0.03])
-                fig.colorbar(im2, cax=cbar_ax2, orientation="horizontal")
-                cbar_ax3 = fig.add_axes([0.70, 0.08, 0.22, 0.03])
-                fig.colorbar(im3, cax=cbar_ax3, orientation="horizontal")
-
-                fname = f"comparison_{step:0{pad_width}d}.png"
-                plt.savefig(
-                    os.path.join(output_dir, fname), dpi=150, bbox_inches="tight"
-                )
-                plt.close()
-
-            if spectral_analysis:
-                pred_spectra = compute_energy_spectra(prd, dataset.sht)
-                truth_spectra = compute_energy_spectra(ref, dataset.sht)
-                plot_path = os.path.join(
-                    spectral_dir, f"spectra_{step:0{pad_width}d}.png"
-                )
-                plot_energy_spectra(
-                    pred_spectra, truth_spectra, step, plot_path, model_name
-                )
-
-    summary = {}
-    for key, values in metrics_data.items():
-        if len(values) > 0:
-            summary[f"{key}_mean"] = np.mean(values)
-            summary[f"{key}_std"] = np.std(values)
-        else:
-            summary[f"{key}_mean"] = float("nan")
-            summary[f"{key}_std"] = float("nan")
-
-    return summary
+    return _aggregate_multi_ic_metrics(all_step_metrics, all_ml_times, all_solver_times)
 
 
 def main():
@@ -644,13 +607,23 @@ def main():
         "--checkpoint", type=str, required=True, help="Path to model checkpoint (.ckpt)"
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="./results",
-        help="Directory to save results",
+        "--output_dir", type=str, default="./results", help="Directory to save results"
     )
     parser.add_argument(
-        "--autoreg_steps", type=int, default=10, help="Number of autoregressive steps"
+        "--autoreg_steps", type=int, default=None, help="Number of autoregressive steps"
+    )
+    parser.add_argument(
+        "--num_ics",
+        type=int,
+        default=1,
+        help="Number of initial conditions to average over (ignored for galewsky)",
+    )
+    parser.add_argument(
+        "--ic_type",
+        type=str,
+        default="random",
+        choices=["random", "galewsky"],
+        help="Initial condition type: random (mach=0.2) or galewsky barotropic jet",
     )
     parser.add_argument(
         "--plot_channel",
@@ -671,6 +644,12 @@ def main():
     parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility"
     )
+    parser.add_argument(
+        "--output_freq",
+        type=int,
+        default=1,
+        help="Save plots and tensors every N steps (step 0 is always saved)",
+    )
 
     args = parser.parse_args()
 
@@ -681,31 +660,34 @@ def main():
 
     config = load_config(args.config)
 
-    if args.device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    else:
-        device = torch.device(args.device)
+    if args.autoreg_steps is None:
+        if args.ic_type == "galewsky":
+            args.autoreg_steps = int(6 * 24 * 3600 / config["data"]["dt"])  # 6 days
+        else:
+            args.autoreg_steps = 100
+            args.output_freq = 10
 
-    model_type = config["experiment"]["model_type"]
-    if model_type == "sfno":
-        model_name = "SFNO"
-    elif model_type == "transformer":
-        model_name = "Spherical Transformer"
-    elif model_type == "paradis":
-        model_name = "PARADIS"
-    else:
-        model_name = model_type.upper()
+    if args.output_freq < 1:
+        raise ValueError("--output_freq must be >= 1")
+
+    device = (
+        torch.device(args.device)
+        if args.device
+        else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    )
 
     print("=" * 70)
     print("FORECAST CONFIGURATION")
     print("=" * 70)
-    print(f"Model: {model_name}")
-    print(f"Checkpoint: {args.checkpoint}")
-    print(f"Device: {device}")
-    print(f"Autoregressive steps: {args.autoreg_steps}")
-    print(f"Output directory: {args.output_dir}")
-    print(f"Save plots: {not args.no_plots}")
-    print(f"Spectral analysis: {args.spectral_analysis}")
+    print(f"Checkpoint:          {args.checkpoint}")
+    print(f"Device:              {device}")
+    print(f"Autoregressive steps:{args.autoreg_steps}")
+    print(f"IC type:             {args.ic_type}")
+    print(f"Initial conditions:  {args.num_ics if args.ic_type == 'random' else 1}")
+    print(f"Output directory:    {args.output_dir}")
+    print(f"Save plots:          {not args.no_plots}")
+    print(f"Spectral analysis:   {args.spectral_analysis}")
+    print(f"Output frequency:    every {args.output_freq} step(s)")
     print("=" * 70 + "\n")
 
     print(f"Loading checkpoint: {args.checkpoint}")
@@ -713,43 +695,25 @@ def main():
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
     state_dict = checkpoint["state_dict"]
-
-    keys_to_ignore = ["metric_w11.k_phi_mesh", "metric_w11.k_theta_mesh"]
-    for key in keys_to_ignore:
+    for key in ["metric_w11.k_phi_mesh", "metric_w11.k_theta_mesh"]:
         if key in state_dict:
             print(f"Removing buffer: {key}")
             del state_dict[key]
-
     model_module.load_state_dict(state_dict, strict=False)
     model_module.eval()
     print("Checkpoint loaded successfully.\n")
 
     print("Setting up Shallow Water Solver...")
     dt = config["data"]["dt"]
-    dt_solver = config["data"]["dt_solver"]
-    nsteps = dt // dt_solver
+    nsteps = dt // config["data"]["dt_solver"]
 
-    use_winds = model_type == "paradis"
-
-    if use_winds:
-        dataset = PdeDatasetWithWinds(
-            dt=dt,
-            nsteps=nsteps,
-            dims=(config["data"]["nlat"], config["data"]["nlon"]),
-            grid=config["data"]["grid"],
-            normalize=True,
-            device=device,
-        )
-    else:
-        dataset = PdeDataset(
-            dt=dt,
-            nsteps=nsteps,
-            dims=(config["data"]["nlat"], config["data"]["nlon"]),
-            grid=config["data"]["grid"],
-            normalize=True,
-            device=device,
-        )
-
+    dataset = PdeDatasetWithWinds(
+        dt=dt,
+        nsteps=nsteps,
+        dims=(config["data"]["nlat"], config["data"]["nlon"]),
+        normalize=True,
+        device=device,
+    )
     dataset.sht = dataset.solver.sht
 
     metrics_dict = {
@@ -758,59 +722,48 @@ def main():
         "W11_error": model_module.metric_w11,
     }
 
-    if use_winds:
-        results = autoregressive_inference_with_winds(
-            model=model_module,
-            dataset=dataset,
-            loss_fn=model_module.loss_fn,
-            metrics_dict=metrics_dict,
-            output_dir=args.output_dir,
-            nsteps=nsteps,
-            model_name=model_name,
-            autoreg_steps=args.autoreg_steps,
-            plot_channel=args.plot_channel,
-            save_plots=(not args.no_plots),
-            spectral_analysis=args.spectral_analysis,
-            device=device,
-        )
-    else:
-        results = autoregressive_inference(
-            model=model_module,
-            dataset=dataset,
-            loss_fn=model_module.loss_fn,
-            metrics_dict=metrics_dict,
-            output_dir=args.output_dir,
-            nsteps=nsteps,
-            model_name=model_name,
-            autoreg_steps=args.autoreg_steps,
-            plot_channel=args.plot_channel,
-            save_plots=(not args.no_plots),
-            spectral_analysis=args.spectral_analysis,
-            device=device,
-        )
+    results = autoregressive_inference(
+        model=model_module,
+        dataset=dataset,
+        loss_fn=model_module.loss_fn,
+        metrics_dict=metrics_dict,
+        output_dir=args.output_dir,
+        nsteps=nsteps,
+        model_name="PARADIS",
+        autoreg_steps=args.autoreg_steps,
+        num_ics=args.num_ics,
+        ic_type=args.ic_type,
+        plot_channel=args.plot_channel,
+        save_plots=(not args.no_plots),
+        spectral_analysis=args.spectral_analysis,
+        device=device,
+        output_freq=args.output_freq,
+    )
 
     print("\n" + "=" * 70)
     print("SUMMARY STATISTICS")
     print("=" * 70)
-
     for key in ["loss", "L1_error", "L2_error", "W11_error"]:
         mean_key = f"{key}_mean"
         std_key = f"{key}_std"
         if mean_key in results:
             print(f"{key:12s}: {results[mean_key]:.6f} ± {results[std_key]:.6f}")
+    print("-" * 70)
+    print(
+        f"{'ML time (s)':12s}: {results['ml_time_mean']:.3f} ± {results['ml_time_std']:.3f}"
+    )
+    print(
+        f"{'Solver (s)':12s}: {results['solver_time_mean']:.3f} ± {results['solver_time_std']:.3f}"
+    )
+    print(f"{'Speedup':12s}: {results['speedup_mean']:.1f}x")
 
-    df = pd.DataFrame([results])
     metrics_path = os.path.join(args.output_dir, "metrics.csv")
-    df.to_csv(metrics_path, index=False)
+    pd.DataFrame([results]).to_csv(metrics_path, index=False)
 
     print("=" * 70)
     print(f"Metrics saved to: {metrics_path}")
     if not args.no_plots:
         print(f"Plots saved to: {args.output_dir}")
-    if args.spectral_analysis:
-        print(
-            f"Spectral analysis saved to: {os.path.join(args.output_dir, 'spectral')}"
-        )
     print("=" * 70)
 
 

@@ -93,6 +93,33 @@ def build_paradis_loss(config):
     )
 
 
+def split_params_for_muon(model):
+    """Split model parameters into two groups for the dual-optimizer setup.
+
+    ``torch.optim.Muon`` requires **exactly** 2-D parameters (matrices).
+    Conv filters (4-D), biases (1-D), and any other non-matrix tensors are
+    routed to AdamW instead.
+
+    Args:
+        model: The nn.Module whose parameters will be split.
+
+    Returns:
+        tuple(list, list): (muon_params, other_params) where muon_params
+        contains all exactly-2D parameter tensors and other_params contains
+        everything else.
+    """
+    muon_params = []
+    other_params = []
+    for param in model.parameters():
+        if not param.requires_grad:
+            continue
+        if param.ndim == 2:
+            muon_params.append(param)
+        else:
+            other_params.append(param)
+    return muon_params, other_params
+
+
 class SWELightningModule(pl.LightningModule):
     """Lightning module for the PARADIS shallow water equation model."""
 
@@ -119,17 +146,51 @@ class SWELightningModule(pl.LightningModule):
 
         self.nfuture = 0
 
+        self.automatic_optimization = False
+
     def forward(self, fields, winds):
         return self.model(fields, winds)
 
     def training_step(self, batch, batch_idx):
+        opt_muon, opt_adamw = self.optimizers()
+
         inp_fields, inp_winds, tar_fields, tar_winds = batch
         prd = self.model(inp_fields, inp_winds)
         for _ in range(self.nfuture):
             prd = self.model(prd, inp_winds)
+
         loss = self.loss_fn(prd, tar_fields)
+
+        opt_muon.zero_grad(set_to_none=True)
+        opt_adamw.zero_grad(set_to_none=True)
+
+        self.manual_backward(loss)
+
+        opt_muon.step()
+        opt_adamw.step()
+
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        return loss
+
+    def _get_schedulers(self):
+        """Return all active LR schedulers as a flat list."""
+        schedulers = self.lr_schedulers()
+        if not schedulers:
+            return []
+        return schedulers if isinstance(schedulers, list) else [schedulers]
+
+    def on_train_epoch_end(self):
+        """Step epoch-based schedulers (e.g. MultiStepLR) at the end of each training epoch."""
+        for scheduler in self._get_schedulers():
+            if not isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step()
+
+    def on_validation_epoch_end(self):
+        """Step ReduceLROnPlateau after validation so it sees the current val_loss."""
+        for scheduler in self._get_schedulers():
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                val_loss = self.trainer.callback_metrics.get("val_loss")
+                if val_loss is not None:
+                    scheduler.step(val_loss)
 
     def validation_step(self, batch, batch_idx):
         inp_fields, inp_winds, tar_fields, tar_winds = batch
@@ -145,36 +206,79 @@ class SWELightningModule(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        """Configure Adam with either MultiStepLR or ReduceLROnPlateau."""
-        lr = self.config["training"]["learning_rate"]
+        """Configure Muon (for exactly 2-D weight matrices) + AdamW (for everything else).
+
+        ``torch.optim.Muon`` only accepts exactly 2-D parameters, so conv
+        weights (4-D), biases (1-D), and any other non-matrix tensors go to
+        AdamW.  The AdamW LR defaults to ``lr * 0.1`` since Muon's effective
+        step size is larger.  All LR values are independently configurable via
+        the config keys ``muon_lr``, ``adamw_lr``, ``muon_momentum``,
+        ``muon_weight_decay``, and ``adamw_weight_decay``.
+
+        MultiStepLR is applied to both optimizers when
+        ``training.lr_milestones`` and ``training.lr_gamma`` are present.
+        Otherwise ReduceLROnPlateau monitors ``val_loss`` for AdamW only
+        (Muon with a fixed LR is the standard recommendation).
+        """
+        train_cfg = self.config["training"]
+        lr = train_cfg["learning_rate"]
         if self.nfuture > 0:
-            lr = self.config["training"]["finetune_learning_rate"]
+            lr = train_cfg["finetune_learning_rate"]
 
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr, foreach=True)
+        muon_lr = train_cfg.get("muon_lr", lr)
+        adamw_lr = train_cfg.get("adamw_lr", lr)
+        muon_momentum = train_cfg.get("muon_momentum", 0.95)
+        muon_wd = train_cfg.get("muon_weight_decay", 0.0)
+        adamw_wd = train_cfg.get("adamw_weight_decay", 1e-4)
 
-        milestones = self.config["training"].get("lr_milestones", None)
-        gamma = self.config["training"].get("lr_gamma", 0.5)
+        muon_params, other_params = split_params_for_muon(self.model)
+
+        muon_optimizer = torch.optim.Muon(
+            muon_params,
+            lr=muon_lr,
+            momentum=muon_momentum,
+            nesterov=True,
+            ns_steps=5,
+            weight_decay=muon_wd,
+        )
+        adamw_optimizer = torch.optim.AdamW(
+            other_params,
+            lr=adamw_lr,
+            weight_decay=adamw_wd,
+            foreach=True,
+        )
+
+        optimizers = [muon_optimizer, adamw_optimizer]
+
+        milestones = train_cfg.get("lr_milestones", None)
+        gamma = train_cfg.get("lr_gamma", 0.5)
 
         if milestones is not None:
-            scheduler = torch.optim.lr_scheduler.MultiStepLR(
-                optimizer, milestones=milestones, gamma=gamma
-            )
-            return {
-                "optimizer": optimizer,
-                "lr_scheduler": {"scheduler": scheduler, "interval": "epoch"},
-            }
+            schedulers = [
+                {
+                    "scheduler": torch.optim.lr_scheduler.MultiStepLR(
+                        muon_optimizer, milestones=milestones, gamma=gamma
+                    ),
+                    "interval": "epoch",
+                },
+                {
+                    "scheduler": torch.optim.lr_scheduler.MultiStepLR(
+                        adamw_optimizer, milestones=milestones, gamma=gamma
+                    ),
+                    "interval": "epoch",
+                },
+            ]
         else:
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, mode="min", factor=0.5, patience=5
-            )
-            return {
-                "optimizer": optimizer,
-                "lr_scheduler": {"scheduler": scheduler, "monitor": "val_loss"},
-            }
+            schedulers = [
+                {
+                    "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(
+                        adamw_optimizer, mode="min", factor=0.5, patience=5
+                    ),
+                    "monitor": "val_loss",
+                },
+            ]
 
-    def optimizer_zero_grad(self, epoch, batch_idx, optimizer):
-        """Zero gradients by setting them to None rather than filling with zeros."""
-        optimizer.zero_grad(set_to_none=True)
+        return optimizers, schedulers
 
     def on_load_checkpoint(self, checkpoint):
         """Filter out W11 mesh buffers that are recomputed on instantiation."""
