@@ -99,11 +99,13 @@ All losses support latitude weighting and per-variable weighting.
 If you use SWAN or build on the PARADIS architecture, please cite:
 
 ```
-@article{paradis2025,
-  title  = {PARADIS: A Physics-Informed Neural Weather Prediction Model},
-  url    = {https://arxiv.org/abs/2601.21151},
-  year   = {2025}
+@article{pereira2026learning,
+  title={Learning to Advect: A Neural Semi-Lagrangian Architecture for Weather Forecasting},
+  author={Pereira, Carlos A and Gaudreault, St{\'e}phane and Dallerit, Valentin and Subich, Christopher and Panday, Shoyon and Wei, Siqi and Zhang, Sasa and Rout, Siddharth and Haber, Eldad and Spiteri, Raymond J and others},
+  journal={arXiv preprint arXiv:2601.21151},
+  year={2026}
 }
+
 ```
 
 ---
