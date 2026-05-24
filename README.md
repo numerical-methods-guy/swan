@@ -88,7 +88,7 @@ Example in `config_paradis.yaml`:
 | `reversed_huber` | Linear for small errors, quadratic for large (default) |
 | `mse` | Mean squared error |
 | `mae` | Mean absolute error |
-| `amse` | Adjusted MSE via spherical harmonic decomposition ([Subich et al., 2025](https://doi.org/10.1002/qj.4884)) |
+| `amse` | Adjusted MSE via spherical harmonic decomposition ([Subich et al., 2025](https://arxiv.org/abs/2501.19374)) |
 
 All losses support latitude weighting and per-variable weighting.
 
