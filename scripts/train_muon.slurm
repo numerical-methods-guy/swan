@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --gres=gpu:1
+#SBATCH --gpus-per-task=1
 #SBATCH --mem=109G
 #SBATCH --time=12:00:00
 #SBATCH --output=/home/avg000/swan/slurm_logs/%j.log
@@ -67,7 +67,7 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY Training/train_muon.py \
   --experiment.name swan_muon_${TS} \
   --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
-  --training.learning_rate 0.00015 \
+  --training.learning_rate 0.0009 \
   --data.batch_size 32 \
   --data.dt_solver 15 \
   --model.paradis.hidden_dim 48 \
@@ -79,8 +79,8 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY Training/train_muon.py \
   --model.paradis.bias_channels 3 \
   --n_rollout_steps 1 \
   --input_step_idx 4 \
-  --train_ic_dict '{"gbells_h": 768, "williamson_case2": 128, "williamson_case6": 128}' \
-  --val_ic_dict '{"gbells_h": 128}' \
+  --train_ic_dict '{"gbells_h": [768, {"gbells_ref_ictype": "williamson_case2"}], "williamson_case2": 128, "williamson_case6": 128}' \
+  --val_ic_dict '{"gbells_h": [128, {"gbells_ref_ictype": "williamson_case2"}]}' \
   2>&1 | tee -a "$LOGFILE"
 
 RC=$?

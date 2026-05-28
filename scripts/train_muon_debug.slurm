@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
-#SBATCH --gres=gpu:1
+#SBATCH --gpus-per-task=1
 #SBATCH --mem=109G
 #SBATCH --time=00:30:00
 #SBATCH --output=/home/avg000/swan/slurm_logs/%j.log
@@ -59,16 +59,16 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY Training/train_muon.py \
   --experiment.name swan_muon_debug_${TS} \
   --training.pretrain_epochs 2 \
   --training.finetune_epochs 0 \
-  --training.learning_rate 0.00015 \
+  --training.learning_rate 0.0009 \
   --data.batch_size 4 \
   --data.dt_solver 15 \
-  --model.paradis.hidden_dim 48 \
-  --model.paradis.num_layers 8 \
-  --model.paradis.num_encoder_layers 3 \
-  --model.paradis.num_vels 12 \
-  --model.paradis.diffusion_size 24 \
-  --model.paradis.reaction_size 12 \
-  --model.paradis.bias_channels 3 \
+  --model.paradis.hidden_dim 4 \
+  --model.paradis.num_layers 2 \
+  --model.paradis.num_encoder_layers 1 \
+  --model.paradis.num_vels 2 \
+  --model.paradis.diffusion_size 4 \
+  --model.paradis.reaction_size 4 \
+  --model.paradis.bias_channels 1 \
   --n_rollout_steps 1 \
   --input_step_idx 4 \
   --train_ic_dict '{"gbells_h": 8, "williamson_case2": 4, "williamson_case6": 4}' \
