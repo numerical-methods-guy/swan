@@ -14,6 +14,8 @@
 
 set -euo pipefail
 
+export PYTHONPATH="/fs/hestia_Heccc/rpnatm/avg000/work/site-packages:${PYTHONPATH:-}"
+
 REPO="/home/avg000/swan"
 PY="/home/avg000/miniconda3/envs/swan/bin/python"
 BASE_SAVEDIR="/space/hall0/work/eccc/mrd/rpnatm/avg000/Trained_weights_and_Graphs"
