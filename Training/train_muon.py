@@ -4,6 +4,10 @@ import argparse
 import yaml
 import torch
 from torch.utils.data import DataLoader
+
+if not hasattr(torch.optim, "Muon"):
+    from muon import Muon as _Muon
+    torch.optim.Muon = _Muon
 import torch.multiprocessing as mp
 
 import pytorch_lightning as pl
