@@ -57,7 +57,7 @@ echo "GPU monitor PID: $GPU_MONITOR_PID  log: $GPU_LOGFILE" | tee -a "$LOGFILE"
 
 cp "$0" "$SAVEDIR/train_muon_debug_${TS}.slurm"
 
-CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY Training/train_muon.py \
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO:${PYTHONPATH}" $PY Training/train_muon.py \
   --config config_paradis.yaml \
   --training.save_dir "$SAVEDIR" \
   --experiment.name swan_muon_debug_${TS} \
