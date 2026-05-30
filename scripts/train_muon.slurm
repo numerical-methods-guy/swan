@@ -1,14 +1,16 @@
-#!/bin/bash
+#!/bin/bash -l
+#SBATCH --export=USER,LOGNAME,HOME,MAIL,PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 #SBATCH --job-name=swan_muon
-#SBATCH --account=eccc_pegasus_mrd
+#SBATCH --account=eccc_pegasus_mrd__gpu_a100
 #SBATCH --partition=gpu_a100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
-#SBATCH --gpus-per-task=1
+#SBATCH --cpus-per-task=16
+#SBATCH --gres=gpu:1
 #SBATCH --mem=109G
 #SBATCH --time=12:00:00
 #SBATCH --output=/home/avg000/swan/slurm_logs/%j.log
+#SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
 
 set -euo pipefail
 
