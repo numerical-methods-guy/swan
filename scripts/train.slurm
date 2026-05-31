@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=109G
 #SBATCH --time=12:00:00
-#SBATCH --output=/home/avg000/swan/slurm_logs/%j.log
+#SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
 #SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
 
 set -euo pipefail
@@ -27,7 +27,7 @@ done
 SAVEDIR="$BASE_SAVEDIR/${DATE}_run${RUN_IDX}"
 mkdir -p "$SAVEDIR"
 
-LOGDIR="$REPO/slurm_logs"
+LOGDIR="/fs/hestia_Heccc/rpnatm/avg000/work/logs"
 mkdir -p "$LOGDIR"
 
 cd "$REPO"

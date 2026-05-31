@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=109G
 #SBATCH --time=00:30:00
-#SBATCH --output=/home/avg000/swan/slurm_logs/%j.log
+#SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
 #SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
 
 set -euo pipefail
@@ -21,7 +21,7 @@ PY="/home/avg000/miniconda3/envs/swan/bin/python"
 SAVEDIR="/space/hall0/work/eccc/mrd/rpnatm/avg000/test_runs_for_debug"
 mkdir -p "$SAVEDIR"
 
-LOGDIR="$REPO/slurm_logs"
+LOGDIR="/fs/hestia_Heccc/rpnatm/avg000/work/logs"
 mkdir -p "$LOGDIR"
 
 cd "$REPO"
