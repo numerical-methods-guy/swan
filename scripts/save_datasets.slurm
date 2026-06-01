@@ -28,6 +28,8 @@ TS="$(date +%Y%m%d_%H%M%S)"
 LOGFILE="$LOGDIR/save_datasets_${TS}.log"
 
 cp "$0" "$LOGDIR/save_datasets_${TS}.slurm"
+mkdir -p "$REPO/old_scripts/${DATE}"
+cp "$0" "$REPO/old_scripts/${DATE}/save_datasets_${TS}.slurm"
 
 echo "Host: $(hostname)"      | tee -a "$LOGFILE"
 echo "Job ID: $SLURM_JOB_ID" | tee -a "$LOGFILE"

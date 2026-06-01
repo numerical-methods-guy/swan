@@ -62,6 +62,8 @@ GPU_MONITOR_PID=$!
 echo "GPU monitor PID: $GPU_MONITOR_PID  log: $GPU_LOGFILE" | tee -a "$LOGFILE"
 
 cp "$0" "$SAVEDIR/train_${TS}.slurm"
+mkdir -p "$REPO/old_scripts/${DATE}"
+cp "$0" "$REPO/old_scripts/${DATE}/train_${TS}.slurm"
 
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY Training/train.py \
   --config config_paradis.yaml \

@@ -64,6 +64,8 @@ GPU_MONITOR_PID=$!
 echo "GPU monitor PID: $GPU_MONITOR_PID  log: $GPU_LOGFILE" | tee -a "$LOGFILE"
 
 cp "$0" "$SAVEDIR/train_muon_${TS}.slurm"
+mkdir -p "$REPO/old_scripts/${DATE}"
+cp "$0" "$REPO/old_scripts/${DATE}/train_muon_${TS}.slurm"
 
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO:${PYTHONPATH}" $PY Training/train_muon.py \
   --config config_paradis.yaml \
@@ -71,7 +73,7 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO:${PYTHONPATH}" $PY Training/train_muon.
   --experiment.name swan_muon_${TS} \
   --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
-  --training.learning_rate 0.0009 \
+  --training.learning_rate 0.00001 \
   --data.batch_size 32 \
   --data.dt_solver 15 \
   --model.paradis.hidden_dim 48 \
