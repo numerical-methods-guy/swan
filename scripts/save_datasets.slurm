@@ -44,7 +44,7 @@ COMMON="--dt 900 --dt_solver 15 --nlat 128 --nlon 256 --n_steps_per_trajectory 1
 
 echo "" | tee -a "$LOGFILE"
 echo "=== Train: gbells_h (1024 samples, ref=random) ===" | tee -a "$LOGFILE"
-PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
   --ictype gbells_h \
   --n_samples 1024 \
   --gbells_ref_ictype random \
@@ -53,7 +53,7 @@ PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
 
 echo "" | tee -a "$LOGFILE"
 echo "=== Train: williamson_case2 (128 samples) ===" | tee -a "$LOGFILE"
-PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
   --ictype williamson_case2 \
   --n_samples 128 \
   --save_dir "$TRAIN_DIR" \
@@ -61,7 +61,7 @@ PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
 
 echo "" | tee -a "$LOGFILE"
 echo "=== Train: williamson_case6 (128 samples) ===" | tee -a "$LOGFILE"
-PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
   --ictype williamson_case6 \
   --n_samples 128 \
   --save_dir "$TRAIN_DIR" \
@@ -72,7 +72,7 @@ PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
 
 echo "" | tee -a "$LOGFILE"
 echo "=== Val: gbells_h (128 samples, ref=random) ===" | tee -a "$LOGFILE"
-PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
   --ictype gbells_h \
   --n_samples 128 \
   --gbells_ref_ictype random \
