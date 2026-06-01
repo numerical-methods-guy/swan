@@ -34,7 +34,7 @@ def build_mixed_dataset(
         stats: dict with per-IC and overall inp_mean, inp_var, wind_mean, wind_var
     """
     for ic_type, val in ic_dict.items():
-        if ic_type == "precomputed":
+        if ic_type.startswith("precomputed"):
             if not (isinstance(val, tuple) and len(val) == 2
                     and isinstance(val[0], int) and val[0] > 0
                     and isinstance(val[1], str)):
@@ -54,7 +54,7 @@ def build_mixed_dataset(
 
     sub_datasets = []
     for ic_type, val in ic_dict.items():
-        if ic_type == "precomputed":
+        if ic_type.startswith("precomputed"):
             n_examples, folder = val
             ic_kwargs = None
             d = MultiStepPdeDatasetWithWinds(
