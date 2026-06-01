@@ -36,16 +36,17 @@ echo "Job ID: $SLURM_JOB_ID" | tee -a "$LOGFILE"
 echo "Time: $(date)"         | tee -a "$LOGFILE"
 nvidia-smi 2>&1              | tee -a "$LOGFILE" || true
 
-COMMON="--dt 900 --dt_solver 15 --nlat 128 --nlon 256 --n_steps_per_trajectory 10 --device cuda"
+COMMON="--dt 900 --dt_solver 15 --nlat 128 --nlon 256 --n_steps_per_trajectory 10 --device cuda \
+  --n_stability_samples 20 --n_stability_steps 8 --stability_threshold 0.01"
 
 # ── TRAINING DATA ──────────────────────────────────────────────────────────────
 
 echo "" | tee -a "$LOGFILE"
-echo "=== Train: gbells_h (768 samples, ref=williamson_case2) ===" | tee -a "$LOGFILE"
+echo "=== Train: gbells_h (1024 samples, ref=random) ===" | tee -a "$LOGFILE"
 PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
   --ictype gbells_h \
-  --n_samples 768 \
-  --gbells_ref_ictype williamson_case2 \
+  --n_samples 1024 \
+  --gbells_ref_ictype random \
   --save_dir "$TRAIN_DIR" \
   2>&1 | tee -a "$LOGFILE"
 
@@ -69,11 +70,11 @@ PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
 # Saved to a separate directory — different random draws from training data
 
 echo "" | tee -a "$LOGFILE"
-echo "=== Val: gbells_h (128 samples, ref=williamson_case2) ===" | tee -a "$LOGFILE"
+echo "=== Val: gbells_h (128 samples, ref=random) ===" | tee -a "$LOGFILE"
 PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
   --ictype gbells_h \
   --n_samples 128 \
-  --gbells_ref_ictype williamson_case2 \
+  --gbells_ref_ictype random \
   --save_dir "$VAL_DIR" \
   2>&1 | tee -a "$LOGFILE"
 
