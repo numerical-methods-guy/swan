@@ -24,6 +24,7 @@ mkdir -p "$TRAIN_DIR" "$VAL_DIR" "$LOGDIR"
 
 cd "$REPO"
 
+DATE="$(date +%Y%m%d)"
 TS="$(date +%Y%m%d_%H%M%S)"
 LOGFILE="$LOGDIR/save_datasets_${TS}.log"
 
