@@ -27,6 +27,8 @@ cd "$REPO"
 TS="$(date +%Y%m%d_%H%M%S)"
 LOGFILE="$LOGDIR/save_datasets_${TS}.log"
 
+cp "$0" "$LOGDIR/save_datasets_${TS}.slurm"
+
 echo "Host: $(hostname)"      | tee -a "$LOGFILE"
 echo "Job ID: $SLURM_JOB_ID" | tee -a "$LOGFILE"
 echo "Time: $(date)"         | tee -a "$LOGFILE"

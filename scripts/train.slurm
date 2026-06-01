@@ -69,7 +69,7 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY Training/train.py \
   --experiment.name swan_${TS} \
   --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
-  --training.learning_rate 0.0009 \
+  --training.learning_rate 0.00001 \
   --data.batch_size 32 \
   --data.dt_solver 15 \
   --model.paradis.hidden_dim 48 \
