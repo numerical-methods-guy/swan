@@ -25,8 +25,14 @@ The spherical harmonic transform is provided by [torch-harmonics](https://github
 ## Installation
 
 ```bash
-pip install torch pytorch-lightning torch-harmonics pyyaml numpy pandas matplotlib
+python3 -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
+
+On Linux, `build-essential` is required so [torch-harmonics](https://github.com/NVIDIA/torch-harmonics) can compile against your PyTorch install. Pin `torch==2.9.1` and build torch-harmonics from source (see `requirements.txt`); the PyPI wheel alone often breaks with `undefined symbol` import errors on newer PyTorch versions.
+
+For NVIDIA GPU, install a matching CUDA build of PyTorch first, then run `pip install -r requirements.txt` without the CPU `--extra-index-url` (edit or use a separate constraints file).
 
 ---
 
@@ -36,10 +42,10 @@ pip install torch pytorch-lightning torch-harmonics pyyaml numpy pandas matplotl
 python train.py --config config_paradis.yaml
 ```
 
-To use the Muon optimizer variant:
+Use the Muon optimizer (PyTorch >= 2.9) via config (`training.optimizer: muon`) or CLI:
 
 ```bash
-python train_muon.py --config config_paradis.yaml
+python train.py --config config_paradis.yaml --optimizer muon
 ```
 
 Config values can be overridden from the command line using dot notation:

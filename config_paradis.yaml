@@ -57,8 +57,15 @@ model:
           hidden_dim: 0
 
 training:
+  optimizer: adam          # adam | muon (Muon requires PyTorch >= 2.9)
   learning_rate: 1.0e-2
   finetune_learning_rate: 1.0e-3
+  # Muon-only overrides (used when optimizer: muon or --optimizer muon):
+  # muon_lr: 1.0e-2
+  # adamw_lr: 1.0e-3
+  # muon_momentum: 0.95
+  # muon_weight_decay: 0.0
+  # adamw_weight_decay: 1.0e-4
   pretrain_epochs: 25
   finetune_epochs: 0
   nfuture: 1

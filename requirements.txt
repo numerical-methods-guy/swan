@@ -1,0 +1,28 @@
+# SWAN — pinned dependencies (Python 3.10–3.12)
+#
+# Setup (CPU / WSL-friendly):
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install --upgrade pip
+#   # Linux: sudo apt install -y build-essential   # needed for torch-harmonics
+#   pip install -r requirements.txt
+#
+# Do NOT `pip install torch-harmonics` from PyPI alone: prebuilt wheels are
+# compiled against a different PyTorch ABI and fail with undefined-symbol errors.
+# torch-harmonics is installed from source below (--no-build-isolation).
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.9.1
+torchvision
+torchaudio
+
+pytorch-lightning>=2.4,<3
+pyyaml>=6
+numpy>=1.22
+pandas>=2
+matplotlib>=3.7
+tensorboard>=2.14
+
+# Compile extensions against the torch wheel installed above.
+--no-build-isolation
+torch-harmonics @ git+https://github.com/NVIDIA/torch-harmonics.git@v0.9.1
