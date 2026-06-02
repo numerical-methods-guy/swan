@@ -4,11 +4,14 @@ from training.strategies.adam import AdamStrategy
 from training.strategies.adamW import AdamWStrategy
 from training.strategies.base import TrainingStrategy
 from training.strategies.muon import MuonStrategy
+from training.strategies.sgd import SGDStrategy
+
 
 REGISTRY: dict[str, type[TrainingStrategy]] = {
     "adam": AdamStrategy,
     "adamw": AdamWStrategy,
     "muon": MuonStrategy,
+    "sgd": SGDStrategy,
 }
 
 

@@ -27,9 +27,9 @@ def main():
     parser.add_argument(
         "--optimizer",
         type=str,
-        choices=["adam", "adamw", "muon"],
+        choices=["adam", "adamw", "muon", "sgd"],
         default=None,
-        help="Override training.optimizer from config (adam | muon)",
+        help="Override training.optimizer from config (adam | adamw | muon | sgd)",
     )
 
     known_args, unknown_args = parser.parse_known_args()
