@@ -1,11 +1,13 @@
 """Lightning training strategies (optimizer + step behavior)."""
 
 from training.strategies.adam import AdamStrategy
+from training.strategies.adamW import AdamWStrategy
 from training.strategies.base import TrainingStrategy
 from training.strategies.muon import MuonStrategy
 
 REGISTRY: dict[str, type[TrainingStrategy]] = {
     "adam": AdamStrategy,
+    "adamw": AdamWStrategy,
     "muon": MuonStrategy,
 }
 
