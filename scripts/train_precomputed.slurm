@@ -84,8 +84,8 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY Training/train.py \
   --model.paradis.bias_channels 3 \
   --n_rollout_steps 1 \
   --input_step_idx 9 \
-  --train_ic_dict '{"precomputed_gbells_h": [768, "'"$TRAIN_DIR"'/gbells_h_15_20260601"], "precomputed_wc2": [128, "'"$TRAIN_DIR"'/williamson_case2_15_20260601"], "precomputed_wc6": [128, "'"$TRAIN_DIR"'/williamson_case6_15_20260601"]}' \
-  --val_ic_dict '{"precomputed_gbells_h": [128, "'"$VAL_DIR"'/gbells_h_15_20260601"]}' \
+  --train_ic_dict '{"precomputed_gbells_h": [768, "'"$TRAIN_DIR"'/gbells_h_15_20260602"], "precomputed_wc2": [128, "'"$TRAIN_DIR"'/williamson_case2_15_20260602"], "precomputed_wc6": [128, "'"$TRAIN_DIR"'/williamson_case6_15_20260602"]}' \
+  --val_ic_dict '{"precomputed_gbells_h": [128, "'"$VAL_DIR"'/gbells_h_15_20260602"]}' \
   2>&1 | tee -a "$LOGFILE"
 
 RC=$?

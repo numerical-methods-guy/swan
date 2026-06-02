@@ -56,6 +56,8 @@ echo "=== Train: williamson_case2 (128 samples) ===" | tee -a "$LOGFILE"
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
   --ictype williamson_case2 \
   --n_samples 128 \
+  --wc2_gh0_min 98450 --wc2_gh0_max 98460 \
+  --wc2_u0_min 1.269 --wc2_u0_max 3.807 \
   --save_dir "$TRAIN_DIR" \
   2>&1 | tee -a "$LOGFILE"
 
@@ -64,6 +66,8 @@ echo "=== Train: williamson_case6 (128 samples) ===" | tee -a "$LOGFILE"
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH="$REPO" $PY dataset/dataset_saver.py $COMMON \
   --ictype williamson_case6 \
   --n_samples 128 \
+  --wc6_h0_min 97368 --wc6_h0_max 98668 \
+  --wc6_omega_min 2.71e-7 --wc6_omega_max 5.03e-7 \
   --save_dir "$TRAIN_DIR" \
   2>&1 | tee -a "$LOGFILE"
 
