@@ -1,0 +1,71 @@
+experiment:
+  name: "spherical_swe_paradis"
+  seed: 42
+  model_type: "paradis"
+
+data:
+  nlat: 128
+  nlon: 256
+  dt: 60
+  dt_solver: 60
+  batch_size: 4
+  num_workers: 0
+  grid: "equiangular"
+  num_train_examples: 512
+  num_val_examples: 64
+
+loss:
+  loss_function: "mse"
+  delta_loss: 1.0
+
+model:
+  paradis:
+    hidden_dim: 32
+    num_layers: 4
+    num_vels: 6
+    base_dt: 60
+    interpolation: "bicubic"
+    bias_channels: 2
+    activation: "SiLU"
+
+    physblock:
+      input_proj:
+        layers: ["SepConv", "CLinear"]
+        hidden_dim: 32
+      velocity_net:
+        layers: ["SepConv"]
+        hidden_dim: 32
+      diffusion:
+        layers: ["SepConv"]
+        hidden_dim: 16
+      reaction:
+        layers: ["CLinear", "CLinear"]
+        hidden_dim: 16
+      output_proj:
+        layers: ["SepConv", "CLinear"]
+        hidden_dim: 32
+      advection:
+        down_projection:
+          layers: ["CLinear"]
+          hidden_dim: 0
+        up_projection:
+          layers: ["SepConv"]
+          hidden_dim: 0
+
+training:
+  learning_rate: 1.0e-2
+  finetune_learning_rate: 1.0e-3
+  pretrain_epochs: 25
+  finetune_epochs: 0
+  nfuture: 1
+  amp_mode: "none"
+  log_every_n_steps: 10
+  save_dir: "./logs"
+  gradient_checkpointing: false
+
+  gauss_newton:
+    damping: 1.0e-3
+    cg_iters: 2
+    cg_tol: 1.0e-6
+    step_size: 1.0
+    max_step_norm: 1.0

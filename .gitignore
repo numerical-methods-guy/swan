@@ -9,6 +9,13 @@ __pycache__/
 logs/
 results/
 
+# Local cluster/Compute Canada helpers
+CCDB_README.md
+env_setup.sh
+slurm_run.sh
+slurm_run_gauss_newton.sh
+slurm_logs/
+
 # Distribution / packaging
 .Python
 build/
