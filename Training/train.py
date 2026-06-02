@@ -263,7 +263,7 @@ def create_datasets(config, device, train_ic_dict=None, val_ic_dict=None,
     if val_ic_dict is None:
         val_ic_dict = {"random": config["data"]["num_val_examples"]}
 
-    train_dataset, _ = build_mixed_dataset(
+    train_dataset, train_stats = build_mixed_dataset(
         ic_dict=train_ic_dict,
         dt=dt,
         nsteps=nsteps,
@@ -285,7 +285,7 @@ def create_datasets(config, device, train_ic_dict=None, val_ic_dict=None,
         normalize=True,
     )
 
-    return train_dataset, val_dataset
+    return train_dataset, val_dataset, train_stats
 
 
 def main():
@@ -339,7 +339,7 @@ def main():
     train_ic_dict = parse_ic_dict(known_args.train_ic_dict) if known_args.train_ic_dict else None
     val_ic_dict = parse_ic_dict(known_args.val_ic_dict) if known_args.val_ic_dict else None
 
-    train_dataset, val_dataset = create_datasets(
+    train_dataset, val_dataset, train_stats = create_datasets(
         config, device,
         train_ic_dict=train_ic_dict,
         val_ic_dict=val_ic_dict,
@@ -364,6 +364,16 @@ def main():
         "wind_var": train_dataset.wind_var.cpu(),
         "input_step_idx": known_args.input_step_idx,
     }, os.path.join(stats_save_dir, "stats.pt"))
+    per_ic_json = [
+        {
+            "ic_type": s["ic_type"],
+            "inp_mean": s["inp_mean"].cpu().tolist(),
+            "inp_var": s["inp_var"].cpu().tolist(),
+            "wind_mean": s["wind_mean"].cpu().tolist(),
+            "wind_var": s["wind_var"].cpu().tolist(),
+        }
+        for s in train_stats["per_ic"]
+    ]
     with open(os.path.join(stats_save_dir, "stats.json"), "w") as _f:
         json.dump({
             "inp_mean": train_dataset.inp_mean.cpu().tolist(),
@@ -371,6 +381,7 @@ def main():
             "wind_mean": train_dataset.wind_mean.cpu().tolist(),
             "wind_var": train_dataset.wind_var.cpu().tolist(),
             "input_step_idx": known_args.input_step_idx,
+            "per_ic": per_ic_json,
         }, _f, indent=2)
     print(f"Saved normalization stats to {stats_save_dir}/stats.{{pt,json}}")
 
