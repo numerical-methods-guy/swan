@@ -18,6 +18,11 @@ REGISTRY: dict[str, type[TrainingStrategy]] = {
 }
 
 
+def available_optimizer_names() -> list[str]:
+    """Return optimizer names supported by the strategy registry."""
+    return sorted(REGISTRY)
+
+
 def build_strategy(name: str, config: dict) -> TrainingStrategy:
     """Instantiate a training strategy by optimizer name."""
     key = name.lower()

@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
-from training.strategies import resolve_optimizer_name
+from training.strategies import available_optimizer_names, resolve_optimizer_name
 from training.config import load_config, update_config_from_args
 from training.datasets import create_datasets
 from training.lightning_module import SWELightningModule
@@ -27,7 +27,7 @@ def main():
     parser.add_argument(
         "--optimizer",
         type=str,
-        choices=["adam", "adamw", "gauss_newton", "muon", "sgd", "mud"],
+        choices=available_optimizer_names(),
         default=None,
         help="Override training.optimizer from config",
     )
