@@ -81,7 +81,11 @@ training:
   log_every_n_steps: 10
   save_dir: "./logs"
   gradient_checkpointing: false  # cfg.compute.gradient_checkpointing in upstream
+  # Consine LR schedule: lr decays towards (but never corsses) cosine_eta_min.
+  # Remove this key to fall back to MultiStepLR or ReduceLROnPlateau.
+  cosine_eta_min: 1.0e-6
   # Deterministic LR schedule: decay by lr_gamma at each milestone epoch.
   # Remove these two keys to fall back to ReduceLROnPlateau.
   lr_milestones: [10, 16]
   lr_gamma: 0.5
+

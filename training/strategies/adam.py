@@ -1,4 +1,4 @@
-"""Adam training strategy with MultiStepLR or ReduceLROnPlateau."""
+"""Adam training strategy with CosineAnnealingLR, MultiStepLR, or ReduceLROnPlateau."""
 
 import torch
 
@@ -17,6 +17,18 @@ class AdamStrategy(TrainingStrategy):
         train_cfg = self.config["training"]
         milestones = train_cfg.get("lr_milestones", None)
         gamma = train_cfg.get("lr_gamma", 0.5)
+        cosine_eta_min = train_cfg.get("cosine_eta_min", None)
+
+        if cosine_eta_min is not None:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=train_cfg.get("pretrain_epochs"),
+                eta_min=cosine_eta_min,
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {"scheduler": scheduler, "interval": "epoch"},
+            }
 
         if milestones is not None:
             scheduler = torch.optim.lr_scheduler.MultiStepLR(
