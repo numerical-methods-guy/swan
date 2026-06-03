@@ -18,6 +18,14 @@ loss:
   loss_function: "reversed_huber"   # Options: "reversed_huber", "mse", "mae, "amse"
   delta_loss: 1.0                   # Threshold for the reversed Huber loss
 
+logging:
+  tensorboard: true
+  mlflow:
+    enabled: false
+    tracking_uri: "./mlruns"
+    experiment_name: "swan"
+    run_name: null
+
 model:
   paradis:
     # --- Top-level model parameters ---

@@ -4,13 +4,13 @@ from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
 
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
 from training.strategies import available_optimizer_names, resolve_optimizer_name
 from training.config import load_config, update_config_from_args
 from training.datasets import create_datasets
 from training.lightning_module import SWELightningModule
+from training.logging import build_loggers
 
 
 def main():
@@ -83,9 +83,7 @@ def main():
         )
         print("=" * 70 + "\n")
 
-        logger = TensorBoardLogger(
-            config["training"]["save_dir"], name=config["experiment"]["name"]
-        )
+        logger = build_loggers(config, run_name=config["experiment"]["name"])
         checkpoint_callback = ModelCheckpoint(
             monitor="val_loss",
             filename="pretrain-{epoch:02d}-{val_loss:.4f}",
@@ -135,9 +133,9 @@ def main():
         val_dataset.nsteps = new_nsteps
         model.nfuture = config["training"]["nfuture"]
 
-        finetune_logger = TensorBoardLogger(
-            config["training"]["save_dir"],
-            name=f"{config['experiment']['name']}_finetune",
+        finetune_logger = build_loggers(
+            config,
+            run_name=f"{config['experiment']['name']}_finetune",
         )
         finetune_checkpoint = ModelCheckpoint(
             monitor="val_loss",
