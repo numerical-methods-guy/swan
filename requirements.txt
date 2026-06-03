@@ -22,6 +22,7 @@ numpy>=1.22
 pandas>=2
 matplotlib>=3.7
 tensorboard>=2.14
+optuna>=4
 
 # Compile extensions against the torch wheel installed above.
 --no-build-isolation

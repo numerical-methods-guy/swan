@@ -12,7 +12,21 @@ class AdamStrategy(TrainingStrategy):
 
     def configure_optimizers(self, module: pl.LightningModule):
         lr = self._resolve_lr(module)
-        optimizer = torch.optim.Adam(module.parameters(), lr=lr, foreach=True)
+        train_cfg = self.config["training"]
+
+        beta1 = train_cfg.get("beta1", 0.9)
+        beta2 = train_cfg.get("beta2", 0.999)
+        epsilon = train_cfg.get("epsilon", 1e-8)
+        weight_decay = train_cfg.get("adam_weight_decay", 0.0)
+
+        optimizer = torch.optim.Adam(
+            module.parameters(),
+            lr=lr,
+            betas=(beta1, beta2),
+            eps=epsilon,
+            weight_decay=weight_decay,
+            foreach=True,
+        )
 
         train_cfg = self.config["training"]
         milestones = train_cfg.get("lr_milestones", None)
