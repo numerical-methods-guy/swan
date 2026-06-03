@@ -53,6 +53,7 @@ model:
           hidden_dim: 0
 
 training:
+  optimizer: "gauss_newton"
   learning_rate: 1.0e-2
   finetune_learning_rate: 1.0e-3
   pretrain_epochs: 25
@@ -64,6 +65,7 @@ training:
   gradient_checkpointing: false
 
   gauss_newton:
+    method: "matrix_free"
     damping: 1.0e-3
     cg_iters: 2
     cg_tol: 1.0e-6

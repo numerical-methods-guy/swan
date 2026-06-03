@@ -3,6 +3,7 @@
 from training.strategies.adam import AdamStrategy
 from training.strategies.adamW import AdamWStrategy
 from training.strategies.base import TrainingStrategy
+from training.strategies.gauss_newton import GaussNewtonStrategy
 from training.strategies.muon import MuonStrategy
 from training.strategies.sgd import SGDStrategy
 from training.strategies.mud import MudStrategy
@@ -10,6 +11,7 @@ from training.strategies.mud import MudStrategy
 REGISTRY: dict[str, type[TrainingStrategy]] = {
     "adam": AdamStrategy,
     "adamw": AdamWStrategy,
+    "gauss_newton": GaussNewtonStrategy,
     "muon": MuonStrategy,
     "sgd": SGDStrategy,
     "mud": MudStrategy,
