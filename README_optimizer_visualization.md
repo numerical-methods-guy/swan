@@ -15,6 +15,13 @@ history_utils.py
 rollout_utils.py
 ```
 
+It also includes two optional bash convenience scripts:
+
+```text
+train_all_optimizers.sh
+visualize_all_optimizers.sh
+```
+
 Users should normally interact only with `visualize.py`.
 
 ---
@@ -68,6 +75,40 @@ It handles:
 - preparing spectra and grid-wise comparison data.
 
 Users do not run this file directly.
+
+---
+
+### `train_all_optimizers.sh`
+
+Bash helper for training the optimizer list used in the examples.
+
+It runs:
+
+```bash
+python train.py --config config_paradis.yaml --optimizer <optimizer> --experiment.name <optimizer>
+```
+
+for each optimizer in the script. With the default `training.save_dir: ./logs`, this creates folders such as `./logs/adam/version_0`.
+
+The script asks whether to clear `./logs` before starting a new training sweep.
+
+---
+
+### `visualize_all_optimizers.sh`
+
+Bash helper for running both visualization commands against the folders created by `train_all_optimizers.sh`.
+
+It runs `plot_history` and `forecast` with matching `--runs` and `--labels` arrays, using paths such as:
+
+```text
+./logs/adam/version_0
+./logs/adamw/version_0
+./logs/mud/version_0
+./logs/muon/version_0
+./logs/sgd/version_0
+```
+
+The script asks whether to clear `./figures_history`, `./figures_forecast`, and `./rollout_results` before plotting.
 
 ---
 
@@ -129,8 +170,15 @@ Your training scripts should save TensorBoard logs and checkpoints in Lightning-
 Example:
 
 ```text
-results/
+logs/
   adam/
+    version_0/
+      events.out.tfevents...
+      checkpoints/
+        last.ckpt
+        pretrain-epoch=...-val_loss=....ckpt
+
+  adamw/
     version_0/
       events.out.tfevents...
       checkpoints/
@@ -155,15 +203,17 @@ results/
 The paths passed to `--runs` should be the `version_0` folders, for example:
 
 ```text
-./results/adam/version_0
-./results/mud/version_0
-./results/muon/version_0
+./logs/adam/version_0
+./logs/adamw/version_0
+./logs/mud/version_0
+./logs/muon/version_0
+./logs/sgd/version_0
 ```
 
 The labels passed to `--labels` should be in the same order:
 
 ```text
-Adam MUD Muon
+Adam AdamW MUD Muon SGD
 ```
 
 The number of paths passed to `--runs` must match the number of labels passed to `--labels`.
@@ -173,7 +223,7 @@ The tools support any number of optimizers, not just three.
 For example, this is valid:
 
 ```text
---runs ./results/adam/version_0 ./results/adamw/version_0 ./results/mud/version_0 ./results/muon/version_0 ./results/sgd/version_0
+--runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0
 --labels Adam AdamW MUD Muon SGD
 ```
 
@@ -181,9 +231,10 @@ For example, this is valid:
 
 ## 5. Recommended Fair Training Setup
 
-> **Terminal line-continuation note:** The examples below use PowerShell line continuation with the backtick character `` ` ``.  
-> If you use **macOS/Linux/Git Bash/WSL**, replace each trailing `` ` `` with `\`.  
-> If you use **Windows Command Prompt (`cmd.exe`)**, replace each trailing `` ` `` with `^`.  
+> **Terminal line-continuation note:** The examples below use Unix shell line continuation with `\`.  
+> This works in macOS/Linux/Git Bash/WSL.  
+> If you use **PowerShell**, replace each trailing `\` with a backtick character `` ` ``.  
+> If you use **Windows Command Prompt (`cmd.exe`)**, replace each trailing `\` with `^`.  
 > Or use the one-line command version, which works in all terminals.
 
 For a fair optimizer comparison, train all optimizers with the same:
@@ -201,34 +252,34 @@ For a fair optimizer comparison, train all optimizers with the same:
 
 The only intended difference should be the optimizer.
 
-Example PowerShell commands:
+Example bash commands:
 
-```powershell
-python path/to/your_train_script_for_adam.py `
-  --config config_paradis.yaml `
-  --experiment.seed 42 `
-  --experiment.name adam `
-  --training.save_dir ./results `
+```bash
+python train.py \
+  --config config_paradis.yaml \
+  --optimizer adam \
+  --experiment.seed 42 \
+  --experiment.name adam \
   --data.num_workers 0
 
-python path/to/your_train_script_for_mud.py `
-  --config config_paradis.yaml `
-  --experiment.seed 42 `
-  --experiment.name mud `
-  --training.save_dir ./results `
+python train.py \
+  --config config_paradis.yaml \
+  --optimizer adamw \
+  --experiment.seed 42 \
+  --experiment.name adamw \
   --data.num_workers 0
 
-python path/to/your_train_script_for_muon.py `
-  --config config_paradis.yaml `
-  --experiment.seed 42 `
-  --experiment.name muon `
-  --training.save_dir ./results `
+python train.py \
+  --config config_paradis.yaml \
+  --optimizer mud \
+  --experiment.seed 42 \
+  --experiment.name mud \
   --data.num_workers 0
 ```
 
-For more optimizers, repeat the same pattern with a unique `--experiment.name` for each run.
+For more optimizers, repeat the same pattern with a unique `--experiment.name` for each run. This repository also includes `train_all_optimizers.sh`, which follows this convention and writes runs under `./logs/<optimizer>/version_0`.
 
-In PowerShell, the backtick character `` ` `` is the line-continuation character. It must be the final character on the line.
+In Unix shells, the backslash `\` is the line-continuation character. It must be the final character on the line.
 
 ---
 
@@ -242,14 +293,14 @@ Use this command to compare TensorBoard training/validation histories.
 
 ## Basic Example
 
-```powershell
-python visualize.py plot_history `
-  --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 `
-  --labels Adam MUD Muon `
-  --stage validation `
-  --plot both `
-  --error_metric l2 `
-  --efficiency_metric both `
+```bash
+python visualize.py plot_history \
+  --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
+  --labels Adam AdamW MUD Muon SGD \
+  --stage validation \
+  --plot both \
+  --error_metric l2 \
+  --efficiency_metric both \
   --outdir ./figures_history
 ```
 
@@ -303,7 +354,7 @@ The original SWAN `train.py` logs training loss, but not training L1/L2/W11 by d
 
 Therefore, when using:
 
-```powershell
+```bash
 --stage both --error_metric l2
 ```
 
@@ -329,14 +380,14 @@ one curve per optimizer
 
 Example:
 
-```powershell
-python visualize.py plot_history `
-  --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 `
-  --labels Adam MUD Muon `
-  --stage validation `
-  --plot learning_curve `
-  --error_metric l2 `
-  --efficiency_metric both `
+```bash
+python visualize.py plot_history \
+  --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
+  --labels Adam AdamW MUD Muon SGD \
+  --stage validation \
+  --plot learning_curve \
+  --error_metric l2 \
+  --efficiency_metric both \
   --outdir ./figures_history
 ```
 
@@ -364,14 +415,14 @@ The code uses cumulative best error, so if validation error temporarily increase
 
 Example:
 
-```powershell
-python visualize.py plot_history `
-  --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 `
-  --labels Adam MUD Muon `
-  --stage validation `
-  --plot hitting_curve `
-  --error_metric l2 `
-  --efficiency_metric both `
+```bash
+python visualize.py plot_history \
+  --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
+  --labels Adam AdamW MUD Muon SGD \
+  --stage validation \
+  --plot hitting_curve \
+  --error_metric l2 \
+  --efficiency_metric both \
   --outdir ./figures_history
 ```
 
@@ -388,14 +439,14 @@ hitting_curve_validation_time_l2.png
 
 To generate both training and validation plots, and both learning/hitting curves:
 
-```powershell
-python visualize.py plot_history `
-  --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 `
-  --labels Adam MUD Muon `
-  --stage both `
-  --plot both `
-  --error_metric l2 `
-  --efficiency_metric both `
+```bash
+python visualize.py plot_history \
+  --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
+  --labels Adam AdamW MUD Muon SGD \
+  --stage both \
+  --plot both \
+  --error_metric l2 \
+  --efficiency_metric both \
   --outdir ./figures_history
 ```
 
@@ -424,15 +475,15 @@ The command finds checkpoints inside each run folder, runs autoregressive rollou
 
 ## Basic Example
 
-```powershell
-python visualize.py forecast `
-  --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 `
-  --labels Adam MUD Muon `
-  --config config_paradis.yaml `
-  --autoreg_steps 100 `
-  --output_freq 10 `
-  --channel vorticity `
-  --rollout_dir ./rollout_results `
+```bash
+python visualize.py forecast \
+  --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
+  --labels Adam AdamW MUD Muon SGD \
+  --config config_paradis.yaml \
+  --autoreg_steps 100 \
+  --output_freq 10 \
+  --channel vorticity \
+  --rollout_dir ./rollout_results \
   --outdir ./figures_forecast
 ```
 
@@ -483,7 +534,7 @@ Controls how far the model is rolled out autoregressively.
 
 For example:
 
-```powershell
+```bash
 --autoreg_steps 100
 ```
 
@@ -495,7 +546,7 @@ Controls how often rollout snapshots are saved.
 
 For example:
 
-```powershell
+```bash
 --autoreg_steps 100 --output_freq 10
 ```
 
@@ -529,7 +580,7 @@ The toolkit resets the forecast seed for each optimizer, so each optimizer is ev
 
 Controls which saved rollout step is loaded for the spatial grids and spectra.
 
-```powershell
+```bash
 --summary_step final
 --summary_step latest
 --summary_step 50
@@ -601,7 +652,7 @@ one curve per optimizer
 
 The selected metric is controlled by:
 
-```powershell
+```bash
 --error_metric l2
 ```
 
@@ -649,7 +700,7 @@ Shows optimizer errors against ground truth at the selected rollout step.
 
 The pointwise error mode is controlled by:
 
-```powershell
+```bash
 --error_mode signed
 --error_mode abs
 --error_mode squared
@@ -690,18 +741,18 @@ Each subplot includes ground truth and all optimizers, with one shared legend.
 
 Use `--synthetic_demo` to test the plotting pipeline without real SWAN checkpoints:
 
-```powershell
-python visualize.py forecast `
-  --synthetic_demo `
-  --labels Adam MUD Muon SGD RMSProp AdamW `
-  --autoreg_steps 20 `
-  --output_freq 5 `
-  --num_ics 2 `
-  --channel vorticity `
-  --error_metric l2 `
-  --error_mode signed `
-  --grid_cols 3 `
-  --rollout_dir ./demo_rollout `
+```bash
+python visualize.py forecast \
+  --synthetic_demo \
+  --labels Adam MUD Muon SGD RMSProp AdamW \
+  --autoreg_steps 20 \
+  --output_freq 5 \
+  --num_ics 2 \
+  --channel vorticity \
+  --error_metric l2 \
+  --error_mode signed \
+  --grid_cols 3 \
+  --rollout_dir ./demo_rollout \
   --outdir ./demo_forecast_figures
 ```
 
@@ -713,62 +764,59 @@ This creates artificial rollout data and all forecast comparison plots. It is us
 
 ### Step 1: Train all optimizers fairly
 
-Use your own optimizer training scripts. The script names do not matter. The important part is to keep the configuration fixed and give each run a unique experiment name.
+Use `train_all_optimizers.sh` to train the optimizer list with a fixed config and one experiment name per optimizer.
 
-```powershell
-python path/to/your_train_script_for_adam.py `
-  --config config_paradis.yaml `
-  --experiment.seed 42 `
-  --experiment.name adam `
-  --training.save_dir ./results `
-  --data.num_workers 0
-
-python path/to/your_train_script_for_mud.py `
-  --config config_paradis.yaml `
-  --experiment.seed 42 `
-  --experiment.name mud `
-  --training.save_dir ./results `
-  --data.num_workers 0
-
-python path/to/your_train_script_for_muon.py `
-  --config config_paradis.yaml `
-  --experiment.seed 42 `
-  --experiment.name muon `
-  --training.save_dir ./results `
-  --data.num_workers 0
+```bash
+bash train_all_optimizers.sh
 ```
 
-For five or six optimizers, simply add more training commands with different experiment names, such as `adamw`, `sgd`, `rmsprop`, or any custom optimizer name.
+The script asks whether to clear `./logs` before training. With the default config and `--experiment.name <optimizer>`, it writes runs such as:
+
+```text
+./logs/adam/version_0
+./logs/adamw/version_0
+./logs/mud/version_0
+./logs/muon/version_0
+./logs/sgd/version_0
+```
 
 ### Step 2: Plot training/validation history
 
-```powershell
-python visualize.py plot_history `
-  --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 `
-  --labels Adam MUD Muon `
-  --stage validation `
-  --plot both `
-  --error_metric l2 `
-  --efficiency_metric both `
+```bash
+python visualize.py plot_history \
+  --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
+  --labels Adam AdamW MUD Muon SGD \
+  --stage both \
+  --plot both \
+  --error_metric l2 \
+  --efficiency_metric both \
   --outdir ./figures_history
 ```
 
 ### Step 3: Plot forecast comparison
 
-```powershell
-python visualize.py forecast `
-  --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 `
-  --labels Adam MUD Muon `
-  --config config_paradis.yaml `
-  --autoreg_steps 100 `
-  --output_freq 10 `
-  --channel vorticity `
-  --error_metric l2 `
-  --error_mode signed `
-  --grid_cols 3 `
-  --rollout_dir ./rollout_results `
+```bash
+python visualize.py forecast \
+  --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
+  --labels Adam AdamW MUD Muon SGD \
+  --config config_paradis.yaml \
+  --autoreg_steps 100 \
+  --output_freq 10 \
+  --channel vorticity \
+  --error_metric l2 \
+  --error_mode signed \
+  --grid_cols 3 \
+  --rollout_dir ./rollout_results \
   --outdir ./figures_forecast
 ```
+
+You can also run both visualization commands with:
+
+```bash
+bash visualize_all_optimizers.sh
+```
+
+That script asks whether to clear `./figures_history`, `./figures_forecast`, and `./rollout_results` before plotting.
 
 ---
 
@@ -776,16 +824,18 @@ python visualize.py forecast `
 
 ### `bash` is not recognized on Windows
 
-You are using PowerShell. Run commands directly in PowerShell using backticks for line continuation, or use one-line commands.
+Use Git Bash, WSL, or convert the examples to PowerShell by replacing each trailing `\` with a backtick character `` ` ``. You can also write any example as a single line.
 
 ### A run goes into `version_1` instead of a new folder
 
 Make sure each training command uses a different experiment name:
 
-```powershell
+```bash
 --experiment.name adam
+--experiment.name adamw
 --experiment.name mud
 --experiment.name muon
+--experiment.name sgd
 ```
 
 Lightning saves logs to:
@@ -811,7 +861,7 @@ If none exists, training plots cannot be generated.
 Each run folder should contain a `checkpoints/` folder:
 
 ```text
-results/
+logs/
   adam/
     version_0/
       checkpoints/
@@ -821,13 +871,12 @@ results/
 
 By default, the toolkit uses:
 
-```powershell
+```bash
 --checkpoint_choice best
 ```
 
 which selects the non-`last.ckpt` checkpoint if available. To use `last.ckpt`, pass:
 
-```powershell
+```bash
 --checkpoint_choice last
 ```
-

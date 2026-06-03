@@ -102,6 +102,18 @@ def resource_axis_name(resource: str) -> str:
     return resource
 
 
+def history_line_style(index: int) -> Dict[str, object]:
+    """Return a clean solid-line style for crowded optimizer history plots."""
+    colors = plt.get_cmap("tab20").colors
+    return {
+        "color": colors[index % len(colors)],
+        "linestyle": "-",
+        "linewidth": 2.2 + 0.15 * (index % 3),
+        "alpha": 0.72,
+        "zorder": 10 + index,
+    }
+
+
 # ---------------------------------------------------------------------------
 # plot_history command
 # ---------------------------------------------------------------------------
@@ -155,15 +167,15 @@ def plot_history_learning_curve(
     metric_name = hist.filename_metric_name(stage, error_metric)
 
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
-    for label, series in series_by_label.items():
+    for i, (label, series) in enumerate(series_by_label.items()):
         x = series.step if resource == "step" else series.relative_time_sec
-        ax.plot(x, series.value, marker="o", markersize=3, linewidth=1.8, label=label)
+        ax.plot(x, series.value, label=label, **history_line_style(i))
 
     ax.set_xlabel(resource_axis_name(resource))
     ax.set_ylabel(y_label)
     ax.set_title(f"{y_label} vs {resource_axis_name(resource)}")
     ax.grid(True, alpha=0.3)
-    ax.legend()
+    ax.legend(frameon=True, framealpha=0.92)
     fig.tight_layout()
 
     output = outdir / f"learning_curve_{stage}_{resource}_{metric_name}.png"
@@ -184,14 +196,15 @@ def plot_history_hitting_curve(
     metric_name = hist.filename_metric_name(stage, error_metric)
 
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
-    for label, (thresholds, hits) in curves.items():
-        ax.plot(thresholds, hits, linewidth=1.8, label=label)
+    for i, (label, (thresholds, hits)) in enumerate(curves.items()):
+        style = history_line_style(i)
+        ax.plot(thresholds, hits, label=label, **style)
 
     ax.set_xlabel(f"target {metric_label} threshold")
     ax.set_ylabel(y_label)
     ax.set_title(f"First hitting {resource} vs target {metric_label}")
     ax.grid(True, alpha=0.3)
-    ax.legend()
+    ax.legend(frameon=True, framealpha=0.92)
     # Thresholds are generated from loose to strict.  Inverting the x-axis makes
     # the plot read naturally: moving right asks for a stricter/lower error.
     ax.invert_xaxis()
