@@ -230,7 +230,6 @@ class MudStrategy(TrainingStrategy):
         cosine_eta_min = train_cfg.get("cosine_eta_min", None)
 
         if cosine_eta_min is not None:
-            print("COSINE COSINE CONSIENOISDFNASDFASDFASDFASDFASDFASDFASDF")
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=train_cfg.get("pretrain_epochs"),
