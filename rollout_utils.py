@@ -224,7 +224,7 @@ def run_real_rollouts(
     except Exception as exc:
         raise RuntimeError("pytorch_lightning is required for real rollout execution.") from exc
 
-    config = forecast.load_config(str(config_path))
+    fallback_config = forecast.load_config(str(config_path))
     device_obj = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     rollout_dir = Path(rollout_dir)
     rollout_dir.mkdir(parents=True, exist_ok=True)
@@ -245,22 +245,41 @@ def run_real_rollouts(
         print(f"Output:     {output_dir}")
         print("=" * 70)
 
-        model_module = forecast.SWELightningModule(config)
         checkpoint = torch.load(str(checkpoint_path), map_location=device_obj)
+        run_config = checkpoint.get("hyper_parameters", {}).get("config")
+        if not isinstance(run_config, dict):
+            run_config = fallback_config
+            print("Checkpoint does not contain a saved config; using --config instead.")
+        else:
+            dims = run_config.get("data", {})
+            print(
+                "Using checkpoint config: "
+                f"nlat={dims.get('nlat')}, nlon={dims.get('nlon')}, "
+                f"dt={dims.get('dt')}, dt_solver={dims.get('dt_solver')}"
+            )
+
+        model_module = forecast.SWELightningModule(run_config)
         state_dict = checkpoint["state_dict"]
         # Match original forecast.py behavior: remove old W11 buffers if present.
         for key in ["metric_w11.k_phi_mesh", "metric_w11.k_theta_mesh"]:
             if key in state_dict:
                 del state_dict[key]
-        model_module.load_state_dict(state_dict, strict=False)
+        try:
+            model_module.load_state_dict(state_dict, strict=False)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"Could not load checkpoint {checkpoint_path}. The checkpoint architecture "
+                "does not match its saved config or the fallback --config. Re-train with the "
+                "current config, or pass/use the config that was used to train this checkpoint."
+            ) from exc
         model_module.eval()
 
-        dt = config["data"]["dt"]
-        nsteps = dt // config["data"]["dt_solver"]
+        dt = run_config["data"]["dt"]
+        nsteps = dt // run_config["data"]["dt_solver"]
         dataset = forecast.PdeDatasetWithWinds(
             dt=dt,
             nsteps=nsteps,
-            dims=(config["data"]["nlat"], config["data"]["nlon"]),
+            dims=(run_config["data"]["nlat"], run_config["data"]["nlon"]),
             normalize=True,
             device=device_obj,
         )
