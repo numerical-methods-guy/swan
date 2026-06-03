@@ -57,7 +57,7 @@ model:
           hidden_dim: 0
 
 training:
-  optimizer: adam          # adam | muon (Muon requires PyTorch >= 2.9)
+  optimizer: adam          # adam | adamw | gauss_newton | mud | muon | sgd
   learning_rate: 1.0e-2
   finetune_learning_rate: 1.0e-3
   # Muon-only overrides (used when optimizer: muon or --optimizer muon):
@@ -66,6 +66,14 @@ training:
   # muon_momentum: 0.95
   # muon_weight_decay: 0.0
   # adamw_weight_decay: 1.0e-4
+  # Gauss-Newton overrides (used when optimizer: gauss_newton):
+  gauss_newton:
+    method: "matrix_free"  # matrix_free | explicit
+    damping: 1.0e-3
+    cg_iters: 2            # matrix_free only
+    cg_tol: 1.0e-6         # matrix_free only
+    step_size: 1.0
+    max_step_norm: 1.0
   pretrain_epochs: 25
   finetune_epochs: 0
   nfuture: 1

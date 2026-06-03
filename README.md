@@ -42,11 +42,15 @@ For NVIDIA GPU, install a matching CUDA build of PyTorch first, then run `pip in
 python train.py --config config_paradis.yaml
 ```
 
-Use the Muon optimizer (PyTorch >= 2.9) via config (`training.optimizer: muon`) or CLI:
+Choose an optimizer via config (`training.optimizer`) or CLI:
 
 ```bash
+python train.py --config config_paradis.yaml --optimizer adamw
 python train.py --config config_paradis.yaml --optimizer muon
+python train.py --config config_paradis.yaml --optimizer gauss_newton
 ```
+
+Supported optimizer strategies are `adam`, `adamw`, `gauss_newton`, `mud`, `muon`, and `sgd`. Muon requires a PyTorch build that provides `torch.optim.Muon`. Gauss-Newton supports `matrix_free` and `explicit` methods under `training.gauss_newton`; the explicit method is intended for tiny debugging runs.
 
 Config values can be overridden from the command line using dot notation:
 
