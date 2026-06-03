@@ -55,6 +55,9 @@ class SWELightningModule(pl.LightningModule):
         return prd, tar_fields, self.loss_fn(prd, tar_fields)
 
     def training_step(self, batch, batch_idx):
+        if hasattr(self.strategy, "training_step_batch"):
+            return self.strategy.training_step_batch(self, batch, batch_idx)
+
         prd, tar_fields, loss = self._compute_loss(batch)
         del prd, tar_fields
         result = self.strategy.training_step(self, loss)
