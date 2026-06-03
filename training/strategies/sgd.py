@@ -19,6 +19,8 @@ class SGDStrategy(TrainingStrategy):
 
         momentum = train_cfg.get("momentum", 0.9)
         weight_decay = train_cfg.get("sgd_weight_decay", 0.0)
+        cosine_eta_min = train_cfg.get("cosine_eta_min", None)
+        num_epochs = train_cfg.get("pretrain_epochs")
 
         print(
             f"Using SGD optimizer with lr={lr}, "
@@ -33,6 +35,16 @@ class SGDStrategy(TrainingStrategy):
             weight_decay=weight_decay,
         )
 
+        if cosine_eta_min is not None:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=num_epochs,
+                eta_min=cosine_eta_min,
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {"scheduler": scheduler, "interval": "epoch"},
+            }
         if milestones is not None:
             scheduler = torch.optim.lr_scheduler.MultiStepLR(
                 optimizer, milestones=milestones, gamma=gamma

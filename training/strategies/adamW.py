@@ -23,8 +23,20 @@ class AdamWStrategy(TrainingStrategy):
         beta1 = train_cfg.get("beta1", 0.9)
         beta2 = train_cfg.get("beta2", 0.999)
         decay_lambda = train_cfg.get("adamw_weight_decay", 0.01)
+        cosine_eta_min = train_cfg.get("cosine_eta_min", None)
+
         optimizer = torch.optim.AdamW(module.parameters(), lr=lr, betas = (beta1,beta2), weight_decay=decay_lambda, foreach=True)
 
+        if cosine_eta_min is not None:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=train_cfg.get("pretrain_epochs"),
+                eta_min=cosine_eta_min,
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {"scheduler": scheduler, "interval": "epoch"},
+        }
         if milestones is not None:
             scheduler = torch.optim.lr_scheduler.MultiStepLR(
                 optimizer, milestones=milestones, gamma=gamma

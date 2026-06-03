@@ -29,7 +29,6 @@ class AdamStrategy(TrainingStrategy):
                 "optimizer": optimizer,
                 "lr_scheduler": {"scheduler": scheduler, "interval": "epoch"},
             }
-
         if milestones is not None:
             scheduler = torch.optim.lr_scheduler.MultiStepLR(
                 optimizer, milestones=milestones, gamma=gamma

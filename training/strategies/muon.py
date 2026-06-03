@@ -67,8 +67,25 @@ class MuonStrategy(TrainingStrategy):
 
         milestones = train_cfg.get("lr_milestones", None)
         gamma = train_cfg.get("lr_gamma", 0.5)
+        cosine_eta_min = train_cfg.get("cosine_eta_min", None)
+        num_epochs = train_cfg.get("pretrain_epochs")
 
-        if milestones is not None:
+        if cosine_eta_min is not None:
+            schedulers = [
+                {
+                    "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
+                        muon_optimizer, T_max=num_epochs, eta_min=cosine_eta_min
+                    ),
+                    "interval": "epoch",
+                },
+                {
+                    "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
+                        adamw_optimizer, T_max=num_epochs, eta_min=cosine_eta_min
+                    ),
+                    "interval": "epoch",
+                }
+            ]
+        elif milestones is not None:
             schedulers = [
                 {
                     "scheduler": torch.optim.lr_scheduler.MultiStepLR(

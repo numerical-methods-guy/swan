@@ -4,8 +4,8 @@ experiment:
   model_type: "paradis"
 
 data:
-  nlat: 128
-  nlon: 256
+  nlat: 32
+  nlon: 64
   dt: 60               # Time step for the model
   dt_solver: 60        # Time step for the underlying solver
   batch_size: 4
@@ -74,7 +74,7 @@ training:
     cg_tol: 1.0e-6         # matrix_free only
     step_size: 1.0
     max_step_norm: 1.0
-  pretrain_epochs: 25
+  pretrain_epochs: 5
   finetune_epochs: 0
   nfuture: 1
   amp_mode: "none"      # Options: "none", "fp16", "bf16"
