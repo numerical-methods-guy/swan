@@ -484,7 +484,24 @@ def prepare_learning_curve_data(
     runs: Sequence[RunScalars], stage: str, error_metric: str
 ) -> Dict[str, ScalarSeries]:
     """Return selected scalar series for learning-curve plots."""
-    return {run.label: select_series(run, stage, error_metric) for run in runs}
+    return {run.label: rebase_relative_time(select_series(run, stage, error_metric)) for run in runs}
+
+
+def rebase_relative_time(series: ScalarSeries) -> ScalarSeries:
+    """Return a copy whose first plotted timestamp is zero.
+
+    Raw TensorBoard and CSV histories can contain different first-event times
+    for different scalar tags.  Rebasing after tag selection makes training and
+    validation curves share the same relative-time origin in plot_history.
+    """
+    if series.relative_time_sec.size == 0:
+        return series
+    return ScalarSeries(
+        tag=series.tag,
+        step=series.step.copy(),
+        relative_time_sec=series.relative_time_sec - float(series.relative_time_sec[0]),
+        value=series.value.copy(),
+    )
 
 
 def prepare_hitting_curve_data(
@@ -515,7 +532,7 @@ def prepare_hitting_curve_data(
     if resource not in ("step", "time"):
         raise ValueError("resource must be 'step' or 'time'")
 
-    selected = {run.label: select_series(run, stage, error_metric) for run in runs}
+    selected = {run.label: rebase_relative_time(select_series(run, stage, error_metric)) for run in runs}
     if not selected:
         return {}
 
