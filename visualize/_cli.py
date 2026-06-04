@@ -41,6 +41,14 @@ Forecast comparison from trained runs::
       --rollout_dir ./rollout_results \\
       --outdir ./figures_forecast
 
+Rollout animation from pre-computed forecast data::
+
+    python -m visualize animate \\
+      --rollout_dir ./rollout_results \\
+      --labels Adam MUD Muon \\
+      --channel vorticity \\
+      --output comparison.gif
+
 Quick synthetic forecast demo::
 
     python -m visualize forecast \\
@@ -68,6 +76,7 @@ from visualize.plots import (
     plot_prediction_grid,
     plot_error_grid,
     plot_combined_spectra,
+    make_rollout_animation,
 )
 
 
@@ -164,6 +173,39 @@ def run_forecast(args: argparse.Namespace) -> None:
     plot_combined_spectra(snapshots, args.output_freq, outdir, spectra_method=spectra_method, sht=sht)
 
 
+def run_animate(args: argparse.Namespace) -> None:
+    """Entry point for the ``animate`` command."""
+    rollout_dir = args.rollout_dir
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+
+    if args.synthetic_demo:
+        labels = args.labels or ["Adam", "MUD", "Muon"]
+        rollout_runs = roll.create_synthetic_rollouts(
+            labels=labels,
+            rollout_dir=rollout_dir,
+            autoreg_steps=args.autoreg_steps,
+            output_freq=args.output_freq,
+            seed=args.seed,
+        )
+        rollout_dirs = [run.rollout_dir for run in rollout_runs]
+    else:
+        if not args.labels:
+            raise ValueError("animate requires --labels unless --synthetic_demo is used.")
+        labels = args.labels
+        rollout_dirs = [
+            Path(rollout_dir) / roll.sanitize_label(label) for label in labels
+        ]
+
+    frames = roll.load_animation_frames(rollout_dirs, labels)
+    make_rollout_animation(
+        frames=frames,
+        channel=args.channel,
+        fps=args.fps,
+        output=args.output,
+        show_error=args.show_error,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Compare SWAN optimizer runs using TensorBoard histories and forecast rollouts."
@@ -209,6 +251,23 @@ def build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--device", default=None, help="Optional real-rollout device, e.g. cuda or cpu. Default: auto")
     fc.add_argument("--synthetic_demo", action="store_true", help="Generate artificial rollout data instead of loading real checkpoints. For tests only.")
     fc.set_defaults(func=run_forecast)
+
+    # animate ----------------------------------------------------------------
+    an = subparsers.add_parser(
+        "animate",
+        help="Animate pre-computed forecast rollouts as a GIF or MP4.",
+    )
+    an.add_argument("--rollout_dir", default="./rollout_results", help="Directory containing per-optimizer rollout folders. Default: ./rollout_results")
+    an.add_argument("--labels", nargs="+", help="Optimizer labels matching the subfolder names. Required unless --synthetic_demo is used.")
+    an.add_argument("--channel", choices=tuple(roll.CHANNEL_TO_INDEX.keys()), default="vorticity", help="Field channel to animate. Default: vorticity")
+    an.add_argument("--output", default="./figures_forecast/animation.gif", help="Output file path (.gif or .mp4). Default: ./figures_forecast/animation.gif")
+    an.add_argument("--fps", type=int, default=8, help="Frames per second. Default: 8")
+    an.add_argument("--show_error", action="store_true", help="Add a second row of signed error maps (prediction − truth).")
+    an.add_argument("--synthetic_demo", action="store_true", help="Generate synthetic rollout data before animating. For tests only.")
+    an.add_argument("--autoreg_steps", type=int, default=20, help="Autoregressive steps for synthetic demo. Default: 20")
+    an.add_argument("--output_freq", type=int, default=4, help="Save-every-N-steps for synthetic demo. Default: 4")
+    an.add_argument("--seed", type=int, default=42, help="Random seed for synthetic demo. Default: 42")
+    an.set_defaults(func=run_animate)
 
     return parser
 
