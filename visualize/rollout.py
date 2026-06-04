@@ -1,13 +1,12 @@
-#!/usr/bin/env python3
 """
-rollout_utils.py
-================
+rollout.py
+==========
 
-Backend utilities for ``visualize.py forecast``.
+Backend utilities for ``visualize forecast``.
 
 This module is intentionally not a public command-line tool.  Users should run
-``python visualize.py forecast ...``.  ``visualize.py`` calls the functions here
-to do the heavy forecast/rollout preparation.
+``python -m visualize forecast ...``.  The CLI calls the functions here to do
+the heavy forecast/rollout preparation.
 
 Design goals
 ------------
@@ -65,8 +64,6 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-# Matplotlib is used only for optional per-optimizer synthetic comparison plots.
-# Final cross-optimizer plots are created in visualize.py.
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -511,7 +508,7 @@ def load_rollout_runs(rollout_dirs: Sequence[str | Path], labels: Sequence[str])
             raise FileNotFoundError(f"Missing metrics.csv in {rollout_path}")
         if not per_step_path.exists():
             raise FileNotFoundError(
-                f"Missing per_step_metrics.csv in {rollout_path}. This file is written by rollout_utils.py."
+                f"Missing per_step_metrics.csv in {rollout_path}. This file is written by visualize.rollout."
             )
         metrics_df = pd.read_csv(metrics_path)
         metrics = {col: float(metrics_df.iloc[0][col]) for col in metrics_df.columns}
@@ -618,6 +615,37 @@ def load_snapshots_for_step(rollout_runs: Sequence[RolloutRun], summary_step: st
     """Load final/common-step prediction/truth snapshots for several runs."""
     step = common_summary_step([run.rollout_dir for run in rollout_runs], summary_step)
     return [load_field_snapshot(run.rollout_dir, run.label, step) for run in rollout_runs]
+
+
+def load_animation_frames(
+    rollout_dirs: Sequence[str | Path],
+    labels: Sequence[str],
+) -> List[List[FieldSnapshot]]:
+    """Load all saved snapshots across every common step for animation.
+
+    Returns a list of frames ordered by step.  Each frame is a list of
+    ``FieldSnapshot`` objects — one per optimizer — all at the same rollout
+    step.  Only steps present in every rollout directory are included so the
+    animation is always consistent across optimizers.
+    """
+    if len(rollout_dirs) != len(labels):
+        raise ValueError("Expected the same number of rollout_dirs and labels.")
+
+    per_run_steps = [set(parse_saved_steps(d)) for d in rollout_dirs]
+    if any(not steps for steps in per_run_steps):
+        raise FileNotFoundError(
+            "Could not find saved prediction_*.pt files in one or more rollout directories. "
+            "Run 'python -m visualize forecast' first."
+        )
+
+    common_steps = sorted(set.intersection(*per_run_steps))
+    if not common_steps:
+        raise ValueError("No common saved rollout steps found across all rollout directories.")
+
+    return [
+        [load_field_snapshot(d, l, step) for d, l in zip(rollout_dirs, labels)]
+        for step in common_steps
+    ]
 
 
 def metric_column(error_metric: str) -> str:
