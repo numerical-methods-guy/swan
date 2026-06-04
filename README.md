@@ -89,7 +89,7 @@ Outputs include per-step comparison plots, energy spectra, saved field tensors, 
 
 ## Configuration
 
-Example in `config_paradis.yaml`:
+Example in `config_paradis.yaml`. For a full reference of all default values — optimizer, loss function, scheduler, model architecture, and Optuna search spaces — see [docs/training_defaults.md](docs/training_defaults.md).
 
 ## Loss Functions
 
