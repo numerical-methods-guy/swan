@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+channel="vorticity"
+
 optimizers=(
   adam
   adamw
@@ -60,9 +62,17 @@ python -m visualize forecast \
   --labels "${labels[@]}" \
   --config config_paradis.yaml \
   --autoreg_steps 100 \
-  --spherical_method spherical\
-  --summary_step final\
-  --output_freq 10 \
-  --channel vorticity \
+  --spherical_method spherical \
+  --summary_step final \
+  --output_freq 5 \
+  --channel "${channel}" \
   --rollout_dir "${rollout_dir}" \
   --outdir "${figures_forecast_dir}"
+
+echo "=== Animating forecast comparison ==="
+python -m visualize animate \
+  --rollout_dir "${rollout_dir}" \
+  --labels "${labels[@]}" \
+  --channel "${channel}" \
+  --output "${figures_forecast_dir}/rollout_fields.gif" \
+  --spectral_output "${figures_forecast_dir}/rollout_spectra.gif"

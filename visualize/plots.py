@@ -212,19 +212,46 @@ def plot_forecast_accuracy_bar(rollout_runs: Sequence[roll.RolloutRun], error_me
     save_figure(fig, outdir / f"forecast_accuracy_bar_{error_metric}.png")
 
 
-def plot_forecast_speedup_bar(rollout_runs: Sequence[roll.RolloutRun], outdir: Path) -> None:
-    """Plot ML-vs-solver speedup from metrics.csv."""
+def plot_forecast_runtime_ratio_bar(rollout_runs: Sequence[roll.RolloutRun], outdir: Path) -> None:
+    """Plot ML-vs-non-ML solver runtime ratio from metrics.csv."""
     labels = [run.label for run in rollout_runs]
-    values = np.array([run.metrics.get("speedup_mean", np.nan) for run in rollout_runs], dtype=float)
+    ml_times = np.array([run.metrics.get("ml_time_mean", np.nan) for run in rollout_runs], dtype=float)
+    solver_times = np.array([run.metrics.get("solver_time_mean", np.nan) for run in rollout_runs], dtype=float)
+    # Runtime ratio is easier to read when the non-ML solver is often faster:
+    # 1.0 means equal runtime, values above 1.0 mean the ML rollout is slower,
+    # and values below 1.0 mean the ML rollout is faster.
+    values = np.divide(
+        ml_times,
+        solver_times,
+        out=np.full_like(ml_times, np.nan, dtype=float),
+        where=np.isfinite(solver_times) & (solver_times > 0),
+    )
 
     fig, ax = plt.subplots(figsize=(max(8.5, 1.25 * len(labels)), 5.4))
     bars = ax.bar(labels, values, color=_bar_colors(len(labels)), edgecolor="black", linewidth=0.7, alpha=0.88)
-    ax.set_ylabel("speedup_mean = solver_time_mean / ml_time_mean")
-    ax.set_title("Forecast rollout speedup (higher is better)", fontweight="bold")
+    ax.axhline(1.0, color="0.25", linestyle="--", linewidth=1.2, alpha=0.8, label="equal runtime")
+    ax.set_ylabel("Runtime ratio")
+    ax.set_title("Forecast rollout runtime vs non-ML solver (lower is better)", fontweight="bold")
     _style_bar_axes(ax)
-    _annotate_bars(ax, bars)
+    finite_heights = [bar.get_height() for bar in bars if np.isfinite(bar.get_height())]
+    if finite_heights:
+        ymax = max(max(finite_heights), 1.0)
+        pad = 0.015 * ymax if ymax != 0 else 0.02
+        for bar in bars:
+            height = bar.get_height()
+            if np.isfinite(height):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height + pad,
+                    f"{height:.3g}x",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                )
+        ax.set_ylim(top=max(ax.get_ylim()[1], ymax + 5 * pad))
+    ax.legend(frameon=False)
     fig.tight_layout()
-    save_figure(fig, outdir / "forecast_speedup_bar.png")
+    save_figure(fig, outdir / "forecast_runtime_ratio_bar.png")
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +407,10 @@ def plot_combined_spectra(
     optimizer is plotted on the same axes together with the same ground truth.
     """
     if spectra_method == "spherical":
+        # Spherical combined spectra are only meaningful when every optimizer
+        # was rolled out against the same truth trajectory.  Comparing against
+        # different random ICs would mix optimizer error with different target
+        # spectra, so fail loudly instead of drawing a misleading overlay.
         for snap in snapshots[1:]:
             if not np.allclose(snap.truth_fields, snapshots[0].truth_fields, rtol=1e-5, atol=1e-6):
                 raise ValueError(
@@ -395,6 +426,9 @@ def plot_combined_spectra(
             for snap in snapshots
         ]
     elif spectra_method == "fft":
+        # Keep the FFT branch available only when explicitly requested or when
+        # synthetic demo data cannot provide forecast.py's spherical transform.
+        # Real comparison runs should normally use the spherical branch above.
         truth_spectra = roll.compute_simple_energy_spectra(snapshots[0].truth_fields)
         pred_spectra = [
             (snap.label, roll.compute_simple_energy_spectra(snap.prediction_fields))
@@ -527,9 +561,10 @@ def make_rollout_animation(
     # Pre-compute global color limits across all steps and optimizers so the
     # scale stays fixed throughout the animation.
     all_field_values = np.concatenate([
-        [snap.truth_fields[ch].ravel(), snap.prediction_fields[ch].ravel()]
+        values
         for step_snaps in frames
         for snap in step_snaps
+        for values in (snap.truth_fields[ch].ravel(), snap.prediction_fields[ch].ravel())
     ])
     vmax_field = float(np.nanpercentile(np.abs(all_field_values), 98))
     vmin_field, vmax_field = -vmax_field, vmax_field
@@ -553,7 +588,7 @@ def make_rollout_animation(
 
     panel_w, panel_h = 4.2, 3.6
     fig_w = panel_w * n_cols
-    fig_h = panel_h * n_rows + 0.6  # extra for suptitle
+    fig_h = panel_h * n_rows + 0.9  # extra for title
 
     fig = plt.figure(figsize=(fig_w, fig_h))
     fig.patch.set_facecolor("#0d1117")
@@ -601,14 +636,17 @@ def make_rollout_animation(
         # Hide the unused bottom-left cell (under the truth panel).
         axes[1][0].set_visible(False)
 
+    # Use a figure-level title rather than per-axes text so the shared title is
+    # retained by Pillow/FFMpeg writers across every rendered animation frame.
+    fig.suptitle(f"Rollout comparison: {channel}", color="white", fontsize=15, fontweight="bold")
     step_label = fig.text(
-        0.5, 0.98,
+        0.5, 0.945,
         "",
         ha="center", va="top",
         color="white", fontsize=12, fontweight="bold",
     )
 
-    fig.tight_layout(rect=[0, 0.0, 1, 0.96])
+    fig.tight_layout(rect=[0, 0.0, 1, 0.92])
 
     def update(frame_index: int):
         step_snaps = frames[frame_index]
@@ -619,7 +657,7 @@ def make_rollout_animation(
             im.set_data(snap.prediction_fields[ch])
         for im, snap in zip(im_errors, step_snaps):
             im.set_data(snap.prediction_fields[ch] - snap.truth_fields[ch])
-        step_label.set_text(f"{channel}  |  step {step}")
+        step_label.set_text(f"rollout step {step}")
         return [im_truth, *im_preds, *im_errors, step_label]
 
     ani = manimation.FuncAnimation(
@@ -627,7 +665,9 @@ def make_rollout_animation(
         update,
         frames=len(frames),
         interval=1000 / fps,
-        blit=True,
+        # Full redraws are a little slower but more reliable for figure-level
+        # titles, colorbars, and text annotations in saved GIF/MP4 outputs.
+        blit=False,
     )
 
     if output is None:
@@ -643,6 +683,167 @@ def make_rollout_animation(
         ani.save(str(output), writer=writer, dpi=120)
         print(f"Saved: {output}")
 
+    plt.close(fig)
+
+
+def make_spectral_image_animation(
+    frames: Sequence[Tuple[int, Sequence[Tuple[str, Path]]]],
+    fps: int = 8,
+    output: Optional[Union[str, Path]] = None,
+) -> None:
+    """Animate saved per-optimizer spectral-analysis PNGs over rollout steps."""
+    if not frames:
+        raise ValueError("spectral frames are empty - nothing to animate.")
+
+    first_step, first_panels = frames[0]
+    n_panels = len(first_panels)
+    n_cols = min(3, n_panels)
+    n_rows = int(math.ceil(n_panels / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5.0 * n_cols, 4.2 * n_rows + 0.7), squeeze=False)
+    fig.patch.set_facecolor("#111827")
+
+    images = []
+    for ax, (label, path) in zip(axes.ravel(), first_panels):
+        img = plt.imread(path)
+        im = ax.imshow(img)
+        ax.set_title(label, color="white", fontsize=11, fontweight="bold", pad=6)
+        ax.axis("off")
+        ax.set_facecolor("#111827")
+        images.append(im)
+    for ax in axes.ravel()[n_panels:]:
+        ax.axis("off")
+        ax.set_facecolor("#111827")
+
+    # This mode displays the exact spectra PNGs emitted by forecast.py for each
+    # optimizer.  It intentionally treats those PNGs as image panels rather than
+    # recomputing spectra, preserving the original per-optimizer diagnostics.
+    fig.suptitle("Spectral analysis comparison", color="white", fontsize=15, fontweight="bold")
+    step_label = fig.text(
+        0.5, 0.955,
+        f"rollout step {first_step}",
+        ha="center", va="top",
+        color="white", fontsize=12, fontweight="bold",
+    )
+    fig.tight_layout(rect=[0, 0.0, 1, 0.93])
+
+    def update(frame_index: int):
+        step, panels = frames[frame_index]
+        for im, (_, path) in zip(images, panels):
+            im.set_data(plt.imread(path))
+        step_label.set_text(f"rollout step {step}")
+        return [*images, step_label]
+
+    ani = manimation.FuncAnimation(fig, update, frames=len(frames), interval=1000 / fps, blit=False)
+    _save_or_show_animation(fig, ani, output, fps=fps, dpi=110)
+
+
+def make_combined_spectral_animation(
+    frames: Sequence[Sequence[roll.FieldSnapshot]],
+    fps: int = 8,
+    output: Optional[Union[str, Path]] = None,
+    config_path: Union[str, Path] = "config_paradis.yaml",
+) -> None:
+    """Animate all optimizer spherical-harmonic spectra in one comparison figure."""
+    if not frames:
+        raise ValueError("frames is empty - nothing to animate.")
+
+    # Build the same SHT object used by forecast.py and reuse it for every frame.
+    # The combined animation should not silently fall back to FFT: if the SWAN
+    # spherical-harmonic diagnostic cannot be constructed, the command should
+    # fail clearly so the plotted spectra are not mistaken for forecast.py output.
+    sht = roll.build_spherical_sht(config_path, frames[0][0].truth_fields.shape)
+    spectral_frames = []
+    y_values = []
+    for step_snaps in frames:
+        # Precompute spectra and global positive y-limits before constructing
+        # the animation.  Fixed log-scale limits keep optimizer differences from
+        # being hidden by per-frame autoscaling.
+        truth_spectra = roll.compute_spherical_energy_spectra(step_snaps[0].truth_fields, sht)
+        pred_spectra = [
+            (snap.label, roll.compute_spherical_energy_spectra(snap.prediction_fields, sht))
+            for snap in step_snaps
+        ]
+        spectral_frames.append((step_snaps[0].step, truth_spectra, pred_spectra))
+        for spectra in [truth_spectra, *[spec for _, spec in pred_spectra]]:
+            for key in ("rotational", "divergent", "potential", "total"):
+                values = np.asarray(spectra[key])
+                y_values.extend(values[np.isfinite(values) & (values > 0)].tolist())
+
+    spec_keys = [
+        ("rotational", "Rotational"),
+        ("divergent", "Divergent"),
+        ("potential", "Potential"),
+        ("total", "Total"),
+    ]
+    labels = [snap.label for snap in frames[0]]
+    colors = _bar_colors(max(1, len(labels)))
+    y_min = max(min(y_values) * 0.6, 1e-14) if y_values else 1e-14
+    y_max = max(y_values) * 1.6 if y_values else 1.0
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle("Combined rollout spectra comparison", fontsize=15, fontweight="bold")
+    step_label = fig.text(0.5, 0.935, "", ha="center", va="top", fontsize=11, fontweight="bold")
+
+    line_sets = []
+    for ax, (key, title) in zip(axes.ravel(), spec_keys):
+        truth_line, = ax.loglog([], [], color="black", linewidth=2.2, linestyle="--", label="Ground Truth")
+        pred_lines = []
+        for i, label in enumerate(labels):
+            line, = ax.loglog([], [], color=colors[i % len(colors)], linewidth=1.8, label=label)
+            pred_lines.append((label, line))
+        ax.set_title(title, fontweight="bold")
+        ax.set_xlabel("Wavenumber $l$")
+        ax.set_ylabel("Power spectrum")
+        ax.set_ylim(y_min, y_max)
+        ax.grid(True, which="both", alpha=0.3)
+        line_sets.append((key, truth_line, pred_lines))
+
+    handles, legend_labels = axes.ravel()[0].get_legend_handles_labels()
+    fig.legend(handles, legend_labels, loc="lower center", ncol=min(4, len(legend_labels)), frameon=False)
+    fig.tight_layout(rect=(0, 0.08, 1, 0.91))
+
+    def update(frame_index: int):
+        step, truth_spectra, pred_spectra = spectral_frames[frame_index]
+        pred_by_label = dict(pred_spectra)
+        artists = [step_label]
+        step_label.set_text(f"rollout step {step}")
+        for ax, (key, truth_line, pred_lines) in zip(axes.ravel(), line_sets):
+            k = np.asarray(truth_spectra["wavenumbers"])[1:]
+            truth_values = np.asarray(truth_spectra[key])[1:]
+            truth_line.set_data(k, truth_values)
+            artists.append(truth_line)
+            for label, line in pred_lines:
+                spectra = pred_by_label[label]
+                line.set_data(np.asarray(spectra["wavenumbers"])[1:], np.asarray(spectra[key])[1:])
+                artists.append(line)
+            if len(k) > 0:
+                ax.set_xlim(left=max(1, k[0]), right=k[-1])
+        return artists
+
+    ani = manimation.FuncAnimation(
+        fig,
+        update,
+        frames=len(spectral_frames),
+        interval=1000 / fps,
+        blit=False,
+    )
+    _save_or_show_animation(fig, ani, output, fps=fps, dpi=120)
+
+
+def _save_or_show_animation(fig: plt.Figure, ani, output: Optional[Union[str, Path]], fps: int, dpi: int) -> None:
+    """Save an animation to GIF/MP4 or show it interactively."""
+    if output is None:
+        plt.show()
+    else:
+        output = Path(output)
+        ext = output.suffix.lower()
+        if ext == ".gif":
+            writer = manimation.PillowWriter(fps=fps)
+        else:
+            writer = manimation.FFMpegWriter(fps=fps, bitrate=1800)
+        print(f"Saving animation to {output} ...")
+        ani.save(str(output), writer=writer, dpi=dpi)
+        print(f"Saved: {output}")
     plt.close(fig)
 
 

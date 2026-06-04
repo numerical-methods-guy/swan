@@ -72,11 +72,13 @@ from visualize.plots import (
     plot_history_hitting_curve,
     plot_forecast_error_curve,
     plot_forecast_accuracy_bar,
-    plot_forecast_speedup_bar,
+    plot_forecast_runtime_ratio_bar,
     plot_prediction_grid,
     plot_error_grid,
     plot_combined_spectra,
     make_rollout_animation,
+    make_combined_spectral_animation,
+    make_spectral_image_animation,
 )
 
 
@@ -161,9 +163,13 @@ def run_forecast(args: argparse.Namespace) -> None:
 
     plot_forecast_error_curve(rollout_runs, args.error_metric, outdir)
     plot_forecast_accuracy_bar(rollout_runs, args.error_metric, outdir)
-    plot_forecast_speedup_bar(rollout_runs, outdir)
+    plot_forecast_runtime_ratio_bar(rollout_runs, outdir)
     plot_prediction_grid(snapshots, args.channel, args.grid_cols, args.output_freq, outdir)
     plot_error_grid(snapshots, args.channel, args.error_mode, args.grid_cols, args.output_freq, outdir)
+    # The static combined spectra should match forecast.py's spherical-harmonic
+    # diagnostic for real rollouts.  Synthetic demo data does not have the SWAN
+    # solver/SHT context needed for that diagnostic, so the demo path keeps the
+    # lightweight FFT fallback only for synthetic testing.
     sht = None
     spectra_method = args.spherical_method
     if spectra_method == "spherical" and not args.synthetic_demo:
@@ -204,6 +210,40 @@ def run_animate(args: argparse.Namespace) -> None:
         output=args.output,
         show_error=args.show_error,
     )
+    spectral_output = args.spectral_output or _default_spectral_output(args.output)
+    Path(spectral_output).parent.mkdir(parents=True, exist_ok=True)
+    # Two spectral animation modes are intentionally separated:
+    # - default: recompute spherical-harmonic spectra from saved tensors and put
+    #   every optimizer on the same animated axes for direct comparison;
+    # - split: stitch the per-optimizer spectra PNGs already written by
+    #   forecast.py, which is useful when each optimizer should be inspected in
+    #   its own original forecast-style figure.
+    if args.split_spectral:
+        spectral_frames = roll.load_spectral_animation_frames(rollout_dirs, labels)
+        make_spectral_image_animation(
+            frames=spectral_frames,
+            fps=args.fps,
+            output=spectral_output,
+        )
+    else:
+        make_combined_spectral_animation(
+            frames=frames,
+            fps=args.fps,
+            output=spectral_output,
+            config_path="config_paradis.yaml",
+        )
+
+
+def _default_spectral_output(output: str | Path) -> Path:
+    """Return a sibling path for the spectral animation."""
+    output = Path(output)
+    suffix = output.suffix or ".gif"
+    stem = output.stem
+    if stem.endswith("_fields"):
+        stem = f"{stem[:-7]}_spectra"
+    else:
+        stem = f"{stem}_spectra"
+    return output.with_name(f"{stem}{suffix}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -260,9 +300,11 @@ def build_parser() -> argparse.ArgumentParser:
     an.add_argument("--rollout_dir", default="./rollout_results", help="Directory containing per-optimizer rollout folders. Default: ./rollout_results")
     an.add_argument("--labels", nargs="+", help="Optimizer labels matching the subfolder names. Required unless --synthetic_demo is used.")
     an.add_argument("--channel", choices=tuple(roll.CHANNEL_TO_INDEX.keys()), default="vorticity", help="Field channel to animate. Default: vorticity")
-    an.add_argument("--output", default="./figures_forecast/animation.gif", help="Output file path (.gif or .mp4). Default: ./figures_forecast/animation.gif")
+    an.add_argument("--output", default="./figures_forecast/rollout_fields.gif", help="Output file path for field animation (.gif or .mp4). Default: ./figures_forecast/rollout_fields.gif")
+    an.add_argument("--spectral_output", default=None, help="Output file path for spectral-analysis animation. Default: derive from --output")
+    an.add_argument("--split_spectral", "--split-spectral", action="store_true", help="Show each optimizer's saved spectral-analysis image separately. Default: combine all optimizers in one spherical-harmonic graph.")
     an.add_argument("--fps", type=int, default=8, help="Frames per second. Default: 8")
-    an.add_argument("--show_error", action="store_true", help="Add a second row of signed error maps (prediction − truth).")
+    an.add_argument("--show_error", action="store_true", help="Add a second row of signed error maps (prediction - truth).")
     an.add_argument("--synthetic_demo", action="store_true", help="Generate synthetic rollout data before animating. For tests only.")
     an.add_argument("--autoreg_steps", type=int, default=20, help="Autoregressive steps for synthetic demo. Default: 20")
     an.add_argument("--output_freq", type=int, default=4, help="Save-every-N-steps for synthetic demo. Default: 4")
