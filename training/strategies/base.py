@@ -34,9 +34,17 @@ class TrainingStrategy(ABC):
     ) -> None:
         """Optional Lightning hook; default is a no-op (Muon zeros grads in training_step)."""
 
-    def _resolve_lr(self, module: pl.LightningModule) -> float:
-        train_cfg = self.config["training"]
-        lr = train_cfg["learning_rate"]
+    def _optim_cfg(self, name) -> dict:
+        """Return optimizer-specific config dict, or empty dict if missing."""
+        return self.config.get("training", {}).get(name, {})
+    
+    def _training_cfg(self) -> dict:
+        """Return optimizer-specific config dict, or empty dict if missing."""
+        return self.config.get("training", {})
+
+    def _resolve_lr(self, module: pl.LightningModule, name) -> float:
+        train_cfg = self._optim_cfg(name)
+        lr = train_cfg["finetune_learning_rate"]
         if module.nfuture > 0:
             lr = train_cfg["finetune_learning_rate"]
         return lr

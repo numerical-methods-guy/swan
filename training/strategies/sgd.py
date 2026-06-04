@@ -11,16 +11,18 @@ class SGDStrategy(TrainingStrategy):
     automatic_optimization = True
 
     def configure_optimizers(self, module: pl.LightningModule):
-        lr = self._resolve_lr(module)
+        lr = self._resolve_lr(module, "sgd")
+        train_common_cfg = self._training_cfg()
+        train_sgd_cfg = self._optim_cfg("sgd")
 
-        train_cfg = self.config["training"]
-        milestones = train_cfg.get("lr_milestones", None)
-        gamma = train_cfg.get("lr_gamma", 0.5)
+        milestones = train_common_cfg.get("lr_milestones", None)
+        gamma = train_common_cfg.get("lr_gamma", 0.5)
+        cosine_eta_min = train_common_cfg.get("cosine_eta_min", None)
+        num_epochs = train_common_cfg.get("pretrain_epochs")
 
-        momentum = train_cfg.get("momentum", 0.9)
-        weight_decay = train_cfg.get("sgd_weight_decay", 0.0)
-        cosine_eta_min = train_cfg.get("cosine_eta_min", None)
-        num_epochs = train_cfg.get("pretrain_epochs")
+        momentum = train_sgd_cfg.get("momentum", 0.9)
+        weight_decay = train_sgd_cfg.get("weight_decay", 0.0)
+
 
         print(
             f"Using SGD optimizer with lr={lr}, "

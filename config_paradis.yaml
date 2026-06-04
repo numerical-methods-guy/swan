@@ -4,8 +4,8 @@ experiment:
   model_type: "paradis"
 
 data:
-  nlat: 32
-  nlon: 64
+  nlat: 128
+  nlon: 256
   dt: 60               # Time step for the model
   dt_solver: 60        # Time step for the underlying solver
   batch_size: 4
@@ -66,29 +66,8 @@ model:
 
 training:
   optimizer: adam          # adam | adamw | gauss_newton | mud | muon | sgd
-  learning_rate: 1.0e-2
-  finetune_learning_rate: 1.0e-3
-  # Muon-only overrides (used when optimizer: muon or --optimizer muon):
-  # muon_lr: 1.0e-2
-  # adamw_lr: 1.0e-3
-  # muon_momentum: 0.95
-  # muon_weight_decay: 0.0
-  # adamw_weight_decay: 1.0e-4
-  # Gauss-Newton overrides (used when optimizer: gauss_newton):
-  gauss_newton:
-    method: "matrix_free"  # matrix_free | explicit
-    damping: 1.0e-3
-    cg_iters: 2            # matrix_free only
-    cg_tol: 1.0e-6         # matrix_free only
-    step_size: 1.0
-    max_step_norm: 1.0
   pretrain_epochs: 5
   finetune_epochs: 0
-  nfuture: 1
-  amp_mode: "none"      # Options: "none", "fp16", "bf16"
-  log_every_n_steps: 10
-  save_dir: "./logs"
-  gradient_checkpointing: false  # cfg.compute.gradient_checkpointing in upstream
   # Consine LR schedule: lr decays towards (but never corsses) cosine_eta_min.
   # Remove this key to fall back to MultiStepLR or ReduceLROnPlateau.
   cosine_eta_min: 1.0e-6
@@ -96,4 +75,49 @@ training:
   # Remove these two keys to fall back to ReduceLROnPlateau.
   lr_milestones: [10, 16]
   lr_gamma: 0.5
+  adam:
+    learning_rate: 1.0e-2
+    finetune_learning_rate: 1.0e-3
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+    weight_decay: 0.0
+  adamw: 
+    learning_rate: 1.0e-2
+    finetune_learning_rate: 1.0e-3
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+    weight_decay: 0.01
+  gauss_newton:
+    method: "matrix_free"  # matrix_free | explicit
+    damping: 1.0e-3
+    cg_iters: 2            # matrix_free only
+    cg_tol: 1.0e-6         # matrix_free only
+    step_size: 1.0
+    max_step_norm: 1.0
+  muon:
+    learning_rate: 1.0e-2
+    finetune_learning_rate: 1.0e-3
+    momentum: 0.95
+    weight_decay: 0.0
+  sgd:
+    learning_rate: 1.0e-2
+    finetune_learning_rate: 1.0e-3
+    momentum: 0.9
+    weight_decay: 0.0
+  mud:
+    learning_rate: 1.0e-2
+    finetune_learning_rate: 1.0e-3
+    weight_decay: 1.0e-2
+    beta: 0.95
+    passes: 1
+    epsilon: 1.0e-8
+
+  nfuture: 1
+  amp_mode: "none"      # Options: "none", "fp16", "bf16"
+  log_every_n_steps: 10
+  save_dir: "./logs"
+  gradient_checkpointing: false  # cfg.compute.gradient_checkpointing in upstream
+
 

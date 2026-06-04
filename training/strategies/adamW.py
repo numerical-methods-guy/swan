@@ -9,28 +9,32 @@ from training.strategies.base import TrainingStrategy
 
 class AdamWStrategy(TrainingStrategy):
     automatic_optimization = True
+    optimizer_name = "adamw"
 
     def configure_optimizers(self, module: pl.LightningModule):
-        lr = self._resolve_lr(module)
+        lr = self._resolve_lr(module, self.optimizer_name)
+        train_adamw_cfg = self._optim_cfg(self.optimizer_name)
+        train_common_cfg = self._training_cfg()
 
-        train_cfg = self.config["training"]
-        milestones = train_cfg.get("lr_milestones", None)
-        gamma = train_cfg.get("lr_gamma", 0.5)
 
         # Initialize optimizer, grab AdamW specific hyperparameters from config -> training
         
         # Default to pytorch default values
-        beta1 = train_cfg.get("beta1", 0.9)
-        beta2 = train_cfg.get("beta2", 0.999)
-        decay_lambda = train_cfg.get("adamw_weight_decay", 0.01)
-        cosine_eta_min = train_cfg.get("cosine_eta_min", None)
+        beta1 = train_adamw_cfg.get("beta1", 0.9)
+        beta2 = train_adamw_cfg.get("beta2", 0.999)
+        epsilon = train_adamw_cfg.get("epsilon", 1.0e-8)
+        weight_decay = train_adamw_cfg.get("weight_decay", 0.01)
 
-        optimizer = torch.optim.AdamW(module.parameters(), lr=lr, betas = (beta1,beta2), weight_decay=decay_lambda, foreach=True)
+        milestones = train_common_cfg.get("lr_milestones", None)
+        gamma = train_common_cfg.get("lr_gamma", 0.5)
+        cosine_eta_min = train_common_cfg.get("cosine_eta_min", None)
+
+        optimizer = torch.optim.AdamW(module.parameters(), lr=lr, betas = (beta1,beta2), eps=epsilon, weight_decay=weight_decay, foreach=True)
 
         if cosine_eta_min is not None:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=train_cfg.get("pretrain_epochs"),
+                T_max=train_common_cfg.get("pretrain_epochs"),
                 eta_min=cosine_eta_min,
             )
             return {

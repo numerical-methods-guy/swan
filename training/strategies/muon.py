@@ -37,14 +37,19 @@ class MuonStrategy(TrainingStrategy):
             )
 
     def configure_optimizers(self, module: pl.LightningModule):
-        train_cfg = self.config["training"]
-        lr = self._resolve_lr(module)
+        train_muon_config = self._optim_cfg("muon")
+        train_adamw_config = self._optim_cfg("adamw")
+        train_common_config = self._training_cfg()
 
-        muon_lr = train_cfg.get("muon_lr", lr)
-        adamw_lr = train_cfg.get("adamw_lr", lr)
-        muon_momentum = train_cfg.get("muon_momentum", 0.95)
-        muon_wd = train_cfg.get("muon_weight_decay", 0.0)
-        adamw_wd = train_cfg.get("adamw_weight_decay", 1e-4)
+        muon_lr = self._resolve_lr(module, "muon")
+        muon_momentum = train_muon_config.get("momentum", 0.95)
+        muon_wd = train_muon_config.get("weight_decay", 0.0)
+
+        adamw_lr = self._resolve_lr(module,"adamw")
+        adamw_wd = train_adamw_config.get("weight_decay", 1e-4)
+        adamw_epsilon = train_adamw_config.get("epsilon", 1.0e-8)
+        adamw_beta1 = train_adamw_config.get("beta1", 0.9)
+        adamw_beta2 = train_adamw_config.get("beta2", 0.999)
 
         muon_params, other_params = split_params_for_muon(module.model)
 
@@ -60,15 +65,17 @@ class MuonStrategy(TrainingStrategy):
             other_params,
             lr=adamw_lr,
             weight_decay=adamw_wd,
+            eps=adamw_epsilon,
+            betas=(adamw_beta1,adamw_beta2),
             foreach=True,
         )
 
         optimizers = [muon_optimizer, adamw_optimizer]
 
-        milestones = train_cfg.get("lr_milestones", None)
-        gamma = train_cfg.get("lr_gamma", 0.5)
-        cosine_eta_min = train_cfg.get("cosine_eta_min", None)
-        num_epochs = train_cfg.get("pretrain_epochs")
+        milestones = train_common_config.get("lr_milestones", None)
+        gamma = train_common_config.get("lr_gamma", 0.5)
+        cosine_eta_min = train_common_config.get("cosine_eta_min", None)
+        num_epochs = train_common_config.get("pretrain_epochs")
 
         if cosine_eta_min is not None:
             schedulers = [

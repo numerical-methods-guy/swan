@@ -11,13 +11,16 @@ class AdamStrategy(TrainingStrategy):
     automatic_optimization = True
 
     def configure_optimizers(self, module: pl.LightningModule):
-        lr = self._resolve_lr(module)
-        train_cfg = self.config["training"]
 
-        beta1 = train_cfg.get("beta1", 0.9)
-        beta2 = train_cfg.get("beta2", 0.999)
-        epsilon = train_cfg.get("epsilon", 1e-8)
-        weight_decay = train_cfg.get("adam_weight_decay", 0.0)
+        train_adam_cfg = self._optim_cfg("adam")
+        train_common_cfg = self._training_cfg()
+        lr = self._resolve_lr(module)
+
+        # Hyperparameters specific to Adam
+        beta1 = train_adam_cfg.get("beta1", 0.9)
+        beta2 = train_adam_cfg.get("beta2", 0.999)
+        epsilon = train_adam_cfg.get("epsilon", 1e-8)
+        weight_decay = train_adam_cfg.get("weight_decay", 0.0)
 
         optimizer = torch.optim.Adam(
             module.parameters(),
@@ -28,15 +31,14 @@ class AdamStrategy(TrainingStrategy):
             foreach=True,
         )
 
-        train_cfg = self.config["training"]
-        milestones = train_cfg.get("lr_milestones", None)
-        gamma = train_cfg.get("lr_gamma", 0.5)
-        cosine_eta_min = train_cfg.get("cosine_eta_min", None)
+        milestones = train_common_cfg.get("lr_milestones", None)
+        gamma = train_common_cfg.get("lr_gamma", 0.5)
+        cosine_eta_min = train_common_cfg.get("cosine_eta_min", None)
 
         if cosine_eta_min is not None:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=train_cfg.get("pretrain_epochs"),
+                T_max=train_common_cfg.get("pretrain_epochs"),
                 eta_min=cosine_eta_min,
             )
             return {

@@ -23,143 +23,136 @@ global:
 
 sgd:
   learning_rate:
-    config_key: training.learning_rate
+    config_key: training.sgd.learning_rate
     type: float
     low: 1.0e-4
     high: 1.0e-1
     log: true
 
   momentum:
-    config_key: training.momentum
+    config_key: training.sgd.momentum
     type: float
     low: 0.0
     high: 0.99
 
-  sgd_weight_decay:
-    config_key: training.sgd_weight_decay
+  weight_decay:
+    config_key: training.sgd.weight_decay
     type: categorical
     choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3]
 
 
 adam:
   learning_rate:
-    config_key: training.learning_rate
+    config_key: training.adam.learning_rate
     type: float
     low: 1.0e-5
     high: 1.0e-2
     log: true
 
   beta1:
-    config_key: training.beta1
+    config_key: training.adam.beta1
     type: float
     low: 0.8
     high: 0.99
 
   beta2:
-    config_key: training.beta2
+    config_key: training.adam.beta2
     type: float
     low: 0.9
     high: 0.9999
 
-  epsilon:
-    config_key: training.epsilon
-    type: float
-    low: 1.0e-8
-    high: 1.0e-4
-    log: true
-
-  adam_weight_decay:
-    config_key: training.adam_weight_decay
+  weight_decay:
+    config_key: training.adam.weight_decay
     type: categorical
     choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3]
 
 
 adamw:
   learning_rate:
-    config_key: training.learning_rate
+    config_key: training.adamw.learning_rate
     type: float
     low: 1.0e-5
     high: 1.0e-2
     log: true
 
   beta1:
-    config_key: training.beta1
+    config_key: training.adamw.beta1
     type: float
     low: 0.8
     high: 0.99
 
   beta2:
-    config_key: training.beta2
+    config_key: training.adamw.beta2
     type: float
     low: 0.9
     high: 0.9999
 
-  adamw_weight_decay:
-    config_key: training.adamw_weight_decay
+  weight_decay:
+    config_key: training.adamw.weight_decay
     type: categorical
     choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2]
 
 
 muon:
   learning_rate:
-    config_key: training.learning_rate
+    config_key: training.muon.learning_rate
     type: float
     low: 1.0e-5
     high: 1.0e-2
     log: true
 
   muon_lr:
-    config_key: training.muon_lr
+    config_key: training.muon.muon_lr
     type: float
     low: 1.0e-5
     high: 1.0e-1
     log: true
 
   adamw_lr:
-    config_key: training.adamw_lr
+    config_key: training.muon.adamw_lr
     type: float
     low: 1.0e-5
     high: 1.0e-2
     log: true
 
-  muon_momentum:
-    config_key: training.muon_momentum
+  momentum:
+    config_key: training.muon.momentum
     type: float
     low: 0.8
     high: 0.99
 
   muon_weight_decay:
-    config_key: training.muon_weight_decay
+    config_key: training.muon.muon_weight_decay
     type: categorical
     choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4]
 
   adamw_weight_decay:
-    config_key: training.adamw_weight_decay
+    config_key: training.muon.adamw_weight_decay
     type: categorical
     choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3]
 
 
 mud:
   learning_rate:
-    config_key: training.learning_rate
+    config_key: training.mud.learning_rate
     type: float
     low: 1.0e-5
     high: 1.0e-2
     log: true
 
   weight_decay:
-    config_key: training.weight_decay
+    config_key: training.mud.weight_decay
     type: categorical
     choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2]
 
-  beta_mud:
-    config_key: training.beta_mud
+  beta:
+    config_key: training.mud.beta
     type: float
     low: 0.8
     high: 0.99
 
-  mud_passes:
-    config_key: training.mud_passes
+  passes:
+    config_key: training.mud.passes
     type: int
     low: 1
     high: 3
