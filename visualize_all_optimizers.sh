@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+channel="vorticity"
+
 optimizers=(
   adam
   adamw
@@ -45,7 +47,7 @@ case "${clear_outputs}" in
 esac
 
 echo "=== Plotting training history ==="
-python visualize.py plot_history \
+python -m visualize plot_history \
   --runs "${runs[@]}" \
   --labels "${labels[@]}" \
   --stage both \
@@ -55,14 +57,22 @@ python visualize.py plot_history \
   --outdir "${figures_history_dir}"
 
 echo "=== Plotting forecast comparison ==="
-python visualize.py forecast \
+python -m visualize forecast \
   --runs "${runs[@]}" \
   --labels "${labels[@]}" \
   --config config_paradis.yaml \
   --autoreg_steps 100 \
-  --spherical_method spherical\
-  --summary_step final\
-  --output_freq 10 \
-  --channel vorticity \
+  --spherical_method spherical \
+  --summary_step final \
+  --output_freq 5 \
+  --channel "${channel}" \
   --rollout_dir "${rollout_dir}" \
   --outdir "${figures_forecast_dir}"
+
+echo "=== Animating forecast comparison ==="
+python -m visualize animate \
+  --rollout_dir "${rollout_dir}" \
+  --labels "${labels[@]}" \
+  --channel "${channel}" \
+  --output "${figures_forecast_dir}/rollout_fields.gif" \
+  --spectral_output "${figures_forecast_dir}/rollout_spectra.gif"

@@ -1,82 +1,34 @@
-#!/usr/bin/env python3
 """
-visualize.py
-============
+plots.py
+========
 
-Public visualization interface for comparing optimizers in the SWAN project.
+All matplotlib figure-building functions for the SWAN visualize package.
 
-Users interact with this file only.  The two backend modules are:
-
-* ``history_utils.py``: reads/prepares TensorBoard or CSV scalar histories.
-* ``rollout_utils.py``: prepares forecast/rollout data, optionally by calling
-  the original ``forecast.py`` helper functions inside the SWAN repository.
-
-Commands
---------
-1. ``plot_history``
-   Compare training/validation histories from TensorBoard logs.
-
-2. ``forecast``
-   Run or synthesize rollout comparisons and generate forecast-level plots.
-
-The plotting code lives here because this is the user-facing file.  The helpers
-return clean data structures, and this script turns them into figures.
-
-Examples
---------
-Training/validation history::
-
-    python visualize.py plot_history \
-      --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 \
-      --labels Adam MUD Muon \
-      --stage validation \
-      --plot both \
-      --error_metric l2 \
-      --efficiency_metric both \
-      --outdir ./figures_history
-
-Forecast comparison from trained runs::
-
-    python visualize.py forecast \
-      --runs ./results/adam/version_0 ./results/mud/version_0 ./results/muon/version_0 \
-      --labels Adam MUD Muon \
-      --config config_paradis.yaml \
-      --autoreg_steps 100 \
-      --output_freq 10 \
-      --channel vorticity \
-      --rollout_dir ./rollout_results \
-      --outdir ./figures_forecast
-
-Quick synthetic forecast demo::
-
-    python visualize.py forecast \
-      --synthetic_demo \
-      --labels Adam MUD Muon \
-      --autoreg_steps 20 \
-      --output_freq 5
+This module contains only rendering logic: it receives clean data structures
+from ``history`` and ``rollout`` and turns them into figures.  It does not
+parse command-line arguments and it does not load data from disk itself.
 """
 
 from __future__ import annotations
 
-import argparse
 import math
+import os
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
-import pandas as pd
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.animation as manimation
 from matplotlib.ticker import ScalarFormatter
 
-import history_utils as hist
-import rollout_utils as roll
+from visualize import history as hist
+from visualize import rollout as roll
 
 
 # ---------------------------------------------------------------------------
-# General plotting helpers
+# General helpers
 # ---------------------------------------------------------------------------
 
 def ensure_outdir(path: str | Path) -> Path:
@@ -115,44 +67,8 @@ def history_line_style(index: int) -> Dict[str, object]:
 
 
 # ---------------------------------------------------------------------------
-# plot_history command
+# plot_history plots
 # ---------------------------------------------------------------------------
-
-def run_plot_history(args: argparse.Namespace) -> None:
-    """Entry point for ``python visualize.py plot_history``."""
-    outdir = ensure_outdir(args.outdir)
-    runs = hist.load_history_runs(args.runs, args.labels)
-
-    for stage in hist.concrete_stages(args.stage):
-        metric = hist.metric_for_stage(stage, args.error_metric)
-
-        if args.plot in ("learning_curve", "both"):
-            for resource in resources_from_arg(args.efficiency_metric):
-                plot_history_learning_curve(
-                    runs=runs,
-                    stage=stage,
-                    error_metric=metric,
-                    resource=resource,
-                    outdir=outdir,
-                )
-
-        if args.plot in ("hitting_curve", "both"):
-            for resource in resources_from_arg(args.efficiency_metric):
-                plot_history_hitting_curve(
-                    runs=runs,
-                    stage=stage,
-                    error_metric=metric,
-                    resource=resource,
-                    outdir=outdir,
-                )
-
-
-def resources_from_arg(efficiency_metric: str) -> List[str]:
-    """Expand ``both`` into ``step`` and ``time``."""
-    if efficiency_metric == "both":
-        return ["step", "time"]
-    return [efficiency_metric]
-
 
 def plot_history_learning_curve(
     runs: Sequence[hist.RunScalars],
@@ -215,71 +131,7 @@ def plot_history_hitting_curve(
 
 
 # ---------------------------------------------------------------------------
-# forecast command
-# ---------------------------------------------------------------------------
-
-def run_forecast(args: argparse.Namespace) -> None:
-    """Entry point for ``python visualize.py forecast``.
-
-    In normal SWAN use, this command receives training run folders.  It finds
-    checkpoints, runs rollouts through rollout_utils.py, then plots comparison
-    figures.  For testing, ``--synthetic_demo`` creates fake rollout folders
-    with the same structure.
-    """
-    outdir = ensure_outdir(args.outdir)
-    rollout_dir = ensure_outdir(args.rollout_dir)
-
-    if args.synthetic_demo:
-        labels = args.labels or ["Adam", "MUD", "Muon"]
-        rollout_runs = roll.create_synthetic_rollouts(
-            labels=labels,
-            rollout_dir=rollout_dir,
-            autoreg_steps=args.autoreg_steps,
-            output_freq=args.output_freq,
-            num_ics=args.num_ics,
-            seed=args.seed,
-        )
-    else:
-        if not args.runs:
-            raise ValueError("forecast requires --runs unless --synthetic_demo is used.")
-        if not args.labels:
-            raise ValueError("forecast requires --labels unless --synthetic_demo is used.")
-        checkpoints = roll.checkpoints_from_runs(args.runs, args.checkpoint_choice)
-        rollout_runs = roll.run_real_rollouts(
-            checkpoints=checkpoints,
-            labels=args.labels,
-            config_path=args.config,
-            rollout_dir=rollout_dir,
-            autoreg_steps=args.autoreg_steps,
-            output_freq=args.output_freq,
-            num_ics=args.num_ics,
-            ic_type=args.ic_type,
-            seed=args.seed,
-            channel=args.channel,
-            device=args.device,
-        )
-
-    # Always reload from disk after generation.  This tests the same path users
-    # rely on later and avoids hidden state in memory.
-    rollout_runs = roll.load_rollout_runs([run.rollout_dir for run in rollout_runs], [run.label for run in rollout_runs])
-    snapshots = roll.load_snapshots_for_step(rollout_runs, args.summary_step)
-
-    plot_forecast_error_curve(rollout_runs, args.error_metric, outdir)
-    plot_forecast_accuracy_bar(rollout_runs, args.error_metric, outdir)
-    plot_forecast_speedup_bar(rollout_runs, outdir)
-    plot_prediction_grid(snapshots, args.channel, args.grid_cols, args.output_freq, outdir)
-    plot_error_grid(snapshots, args.channel, args.error_mode, args.grid_cols, args.output_freq, outdir)
-    sht = None
-    spectra_method = args.spherical_method
-    if spectra_method == "spherical" and not args.synthetic_demo:
-        sht = roll.build_spherical_sht(args.config, snapshots[0].truth_fields.shape, args.device)
-    elif spectra_method == "spherical":
-        spectra_method = "fft"
-    plot_combined_spectra(snapshots, args.output_freq, outdir, spectra_method=spectra_method, sht=sht)
-
-
-# ---------------------------------------------------------------------------
-# Forecast scalar plots
+# forecast scalar plots
 # ---------------------------------------------------------------------------
 
 def plot_forecast_error_curve(rollout_runs: Sequence[roll.RolloutRun], error_metric: str, outdir: Path) -> None:
@@ -345,12 +197,7 @@ def _annotate_bars(ax: plt.Axes, bars) -> None:
 
 
 def plot_forecast_accuracy_bar(rollout_runs: Sequence[roll.RolloutRun], error_metric: str, outdir: Path) -> None:
-    """Plot aggregate forecast error from metrics.csv.
-
-    This is a bar chart, not a histogram: there is one aggregate scalar per
-    optimizer.  The value is typically averaged over rollout steps and initial
-    conditions by rollout_utils.py / forecast.py.
-    """
+    """Plot aggregate forecast error from metrics.csv."""
     column = roll.metric_mean_column(error_metric)
     labels = [run.label for run in rollout_runs]
     values = np.array([run.metrics.get(column, np.nan) for run in rollout_runs], dtype=float)
@@ -365,23 +212,50 @@ def plot_forecast_accuracy_bar(rollout_runs: Sequence[roll.RolloutRun], error_me
     save_figure(fig, outdir / f"forecast_accuracy_bar_{error_metric}.png")
 
 
-def plot_forecast_speedup_bar(rollout_runs: Sequence[roll.RolloutRun], outdir: Path) -> None:
-    """Plot ML-vs-solver speedup from metrics.csv."""
+def plot_forecast_runtime_ratio_bar(rollout_runs: Sequence[roll.RolloutRun], outdir: Path) -> None:
+    """Plot ML-vs-non-ML solver runtime ratio from metrics.csv."""
     labels = [run.label for run in rollout_runs]
-    values = np.array([run.metrics.get("speedup_mean", np.nan) for run in rollout_runs], dtype=float)
+    ml_times = np.array([run.metrics.get("ml_time_mean", np.nan) for run in rollout_runs], dtype=float)
+    solver_times = np.array([run.metrics.get("solver_time_mean", np.nan) for run in rollout_runs], dtype=float)
+    # Runtime ratio is easier to read when the non-ML solver is often faster:
+    # 1.0 means equal runtime, values above 1.0 mean the ML rollout is slower,
+    # and values below 1.0 mean the ML rollout is faster.
+    values = np.divide(
+        ml_times,
+        solver_times,
+        out=np.full_like(ml_times, np.nan, dtype=float),
+        where=np.isfinite(solver_times) & (solver_times > 0),
+    )
 
     fig, ax = plt.subplots(figsize=(max(8.5, 1.25 * len(labels)), 5.4))
     bars = ax.bar(labels, values, color=_bar_colors(len(labels)), edgecolor="black", linewidth=0.7, alpha=0.88)
-    ax.set_ylabel("speedup_mean = solver_time_mean / ml_time_mean")
-    ax.set_title("Forecast rollout speedup (higher is better)", fontweight="bold")
+    ax.axhline(1.0, color="0.25", linestyle="--", linewidth=1.2, alpha=0.8, label="equal runtime")
+    ax.set_ylabel("Runtime ratio")
+    ax.set_title("Forecast rollout runtime vs non-ML solver (lower is better)", fontweight="bold")
     _style_bar_axes(ax)
-    _annotate_bars(ax, bars)
+    finite_heights = [bar.get_height() for bar in bars if np.isfinite(bar.get_height())]
+    if finite_heights:
+        ymax = max(max(finite_heights), 1.0)
+        pad = 0.015 * ymax if ymax != 0 else 0.02
+        for bar in bars:
+            height = bar.get_height()
+            if np.isfinite(height):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height + pad,
+                    f"{height:.3g}x",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                )
+        ax.set_ylim(top=max(ax.get_ylim()[1], ymax + 5 * pad))
+    ax.legend(frameon=False)
     fig.tight_layout()
-    save_figure(fig, outdir / "forecast_speedup_bar.png")
+    save_figure(fig, outdir / "forecast_runtime_ratio_bar.png")
 
 
 # ---------------------------------------------------------------------------
-# Forecast spatial grid plots
+# forecast spatial grid plots
 # ---------------------------------------------------------------------------
 
 def plot_prediction_grid(
@@ -494,7 +368,7 @@ def plot_image_panels(
 
 
 # ---------------------------------------------------------------------------
-# Forecast spectral plot
+# forecast spectral plot
 # ---------------------------------------------------------------------------
 
 def _scaled_power_law(k: np.ndarray, spectrum: np.ndarray, exponent: float) -> np.ndarray:
@@ -533,6 +407,10 @@ def plot_combined_spectra(
     optimizer is plotted on the same axes together with the same ground truth.
     """
     if spectra_method == "spherical":
+        # Spherical combined spectra are only meaningful when every optimizer
+        # was rolled out against the same truth trajectory.  Comparing against
+        # different random ICs would mix optimizer error with different target
+        # spectra, so fail loudly instead of drawing a misleading overlay.
         for snap in snapshots[1:]:
             if not np.allclose(snap.truth_fields, snapshots[0].truth_fields, rtol=1e-5, atol=1e-6):
                 raise ValueError(
@@ -548,6 +426,9 @@ def plot_combined_spectra(
             for snap in snapshots
         ]
     elif spectra_method == "fft":
+        # Keep the FFT branch available only when explicitly requested or when
+        # synthetic demo data cannot provide forecast.py's spherical transform.
+        # Real comparison runs should normally use the spherical branch above.
         truth_spectra = roll.compute_simple_energy_spectra(snapshots[0].truth_fields)
         pred_spectra = [
             (snap.label, roll.compute_simple_energy_spectra(snap.prediction_fields))
@@ -637,63 +518,337 @@ def plot_combined_spectra(
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# Rollout animation
 # ---------------------------------------------------------------------------
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Compare SWAN optimizer runs using TensorBoard histories and forecast rollouts."
+def make_rollout_animation(
+    frames: Sequence[Sequence[roll.FieldSnapshot]],
+    channel: str,
+    fps: int = 8,
+    output: Optional[Union[str, Path]] = None,
+    show_error: bool = False,
+) -> None:
+    """Create a multi-optimizer comparison animation from pre-computed rollouts.
+
+    Each frame is a timestep.  The top row shows ground truth alongside every
+    optimizer's prediction on a shared colorscale.  When ``show_error=True`` a
+    second row shows the signed pointwise error (prediction − truth) for each
+    optimizer on a shared error colorscale.
+
+    Parameters
+    ----------
+    frames:
+        Output of ``rollout.load_animation_frames`` — a list of steps, each
+        step being a list of ``FieldSnapshot`` objects (one per optimizer).
+    channel:
+        Field channel name to animate (``'h'``, ``'vorticity'``, or
+        ``'divergence'``).
+    fps:
+        Frames per second.
+    output:
+        Destination file path (.gif or .mp4).  Passing ``None`` shows the
+        animation interactively.
+    show_error:
+        When ``True``, adds a second row of signed error panels.
+    """
+    if not frames:
+        raise ValueError("frames is empty — nothing to animate.")
+
+    ch = roll.CHANNEL_TO_INDEX[channel]
+    n_opts = len(frames[0])
+    labels = [snap.label for snap in frames[0]]
+
+    # Pre-compute global color limits across all steps and optimizers so the
+    # scale stays fixed throughout the animation.
+    all_field_values = np.concatenate([
+        values
+        for step_snaps in frames
+        for snap in step_snaps
+        for values in (snap.truth_fields[ch].ravel(), snap.prediction_fields[ch].ravel())
+    ])
+    vmax_field = float(np.nanpercentile(np.abs(all_field_values), 98))
+    vmin_field, vmax_field = -vmax_field, vmax_field
+
+    err_abs_max = 0.0
+    if show_error:
+        all_errors = np.concatenate([
+            (snap.prediction_fields[ch] - snap.truth_fields[ch]).ravel()
+            for step_snaps in frames
+            for snap in step_snaps
+        ])
+        err_abs_max = float(max(
+            abs(np.nanpercentile(all_errors, 2)),
+            abs(np.nanpercentile(all_errors, 98)),
+        ))
+
+    # Layout: top row = Truth + N optimizer predictions,
+    #         bottom row (optional) = N error maps.
+    n_rows = 2 if show_error else 1
+    n_cols = 1 + n_opts  # truth + one column per optimizer
+
+    panel_w, panel_h = 4.2, 3.6
+    fig_w = panel_w * n_cols
+    fig_h = panel_h * n_rows + 0.9  # extra for title
+
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    fig.patch.set_facecolor("#0d1117")
+
+    axes = fig.subplots(n_rows, n_cols, squeeze=False)
+    for row_axes in axes:
+        for ax in row_axes:
+            ax.axis("off")
+            ax.set_facecolor("#0d1117")
+
+    # Top row: truth + predictions.
+    im_truth = axes[0][0].imshow(
+        np.zeros_like(frames[0][0].truth_fields[ch]),
+        cmap="twilight_shifted", vmin=vmin_field, vmax=vmax_field,
+        origin="upper", aspect="auto",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    axes[0][0].set_title("Ground Truth", color="white", fontsize=11, fontweight="bold", pad=6)
+    _dark_colorbar(fig, im_truth, axes[0][0])
 
-    # plot_history command ----------------------------------------------------
-    ph = subparsers.add_parser(
-        "plot_history",
-        help="Plot training/validation histories from TensorBoard or CSV scalar logs.",
+    im_preds = []
+    for col, label in enumerate(labels):
+        im = axes[0][col + 1].imshow(
+            np.zeros_like(frames[0][col].prediction_fields[ch]),
+            cmap="twilight_shifted", vmin=vmin_field, vmax=vmax_field,
+            origin="upper", aspect="auto",
+        )
+        axes[0][col + 1].set_title(label, color="white", fontsize=11, fontweight="bold", pad=6)
+        _dark_colorbar(fig, im, axes[0][col + 1])
+        im_preds.append(im)
+
+    # Bottom row: error maps (optional).
+    im_errors = []
+    if show_error:
+        for col, label in enumerate(labels):
+            im = axes[1][col + 1].imshow(
+                np.zeros_like(frames[0][col].prediction_fields[ch]),
+                cmap="RdBu_r", vmin=-err_abs_max, vmax=err_abs_max,
+                origin="upper", aspect="auto",
+            )
+            axes[1][col + 1].set_title(
+                f"{label} error", color="white", fontsize=10, fontweight="bold", pad=6
+            )
+            _dark_colorbar(fig, im, axes[1][col + 1])
+            im_errors.append(im)
+        # Hide the unused bottom-left cell (under the truth panel).
+        axes[1][0].set_visible(False)
+
+    # Use a figure-level title rather than per-axes text so the shared title is
+    # retained by Pillow/FFMpeg writers across every rendered animation frame.
+    fig.suptitle(f"Rollout comparison: {channel}", color="white", fontsize=15, fontweight="bold")
+    step_label = fig.text(
+        0.5, 0.945,
+        "",
+        ha="center", va="top",
+        color="white", fontsize=12, fontweight="bold",
     )
-    ph.add_argument("--runs", nargs="+", required=True, help="Run directories, e.g. ./results/adam/version_0")
-    ph.add_argument("--labels", nargs="+", required=True, help="Legend labels, one per run directory")
-    ph.add_argument("--stage", choices=hist.STAGES, default="validation", help="History stage to plot. Default: validation")
-    ph.add_argument("--plot", choices=hist.HISTORY_PLOTS, default="learning_curve", help="History plot type. Default: learning_curve")
-    ph.add_argument("--error_metric", choices=hist.ERROR_METRICS, default="loss", help="Error/loss metric. Default: loss")
-    ph.add_argument("--efficiency_metric", choices=hist.EFFICIENCY_METRICS, default="both", help="X-axis resource. Default: both")
-    ph.add_argument("--outdir", default="./figures", help="Directory for history figures. Default: ./figures")
-    ph.set_defaults(func=run_plot_history)
 
-    # forecast command --------------------------------------------------------
-    fc = subparsers.add_parser(
-        "forecast",
-        help="Run/compare forecast rollouts from trained run folders.",
+    fig.tight_layout(rect=[0, 0.0, 1, 0.92])
+
+    def update(frame_index: int):
+        step_snaps = frames[frame_index]
+        step = step_snaps[0].step
+        truth = step_snaps[0].truth_fields[ch]
+        im_truth.set_data(truth)
+        for im, snap in zip(im_preds, step_snaps):
+            im.set_data(snap.prediction_fields[ch])
+        for im, snap in zip(im_errors, step_snaps):
+            im.set_data(snap.prediction_fields[ch] - snap.truth_fields[ch])
+        step_label.set_text(f"rollout step {step}")
+        return [im_truth, *im_preds, *im_errors, step_label]
+
+    ani = manimation.FuncAnimation(
+        fig,
+        update,
+        frames=len(frames),
+        interval=1000 / fps,
+        # Full redraws are a little slower but more reliable for figure-level
+        # titles, colorbars, and text annotations in saved GIF/MP4 outputs.
+        blit=False,
     )
-    fc.add_argument("--runs", nargs="+", help="Training run directories containing checkpoints/. Required unless --synthetic_demo is used.")
-    fc.add_argument("--labels", nargs="+", help="Optimizer labels. Required unless --synthetic_demo is used; synthetic defaults to Adam MUD Muon.")
-    fc.add_argument("--config", default="config_paradis.yaml", help="SWAN config file. Default: config_paradis.yaml")
-    fc.add_argument("--checkpoint_choice", choices=("best", "last"), default="best", help="Checkpoint to use from each run. Default: best")
-    fc.add_argument("--autoreg_steps", type=int, default=100, help="Number of autoregressive rollout steps. Default: 100")
-    fc.add_argument("--output_freq", type=int, default=10, help="Save rollout tensors/plots every N steps. Default: 10")
-    fc.add_argument("--num_ics", type=int, default=1, help="Number of forecast initial conditions. Default: 1")
-    fc.add_argument("--ic_type", choices=("random", "galewsky"), default="random", help="Forecast initial condition type. Default: random")
-    fc.add_argument("--seed", type=int, default=42, help="Forecast-time random seed. Default: 42")
-    fc.add_argument("--channel", choices=tuple(roll.CHANNEL_TO_INDEX.keys()), default="vorticity", help="Field channel for spatial plots. Default: vorticity")
-    fc.add_argument("--error_metric", choices=tuple(roll.ERROR_METRIC_TO_COLUMN.keys()), default="l2", help="Scalar forecast metric. Default: l2")
-    fc.add_argument("--error_mode", choices=("signed", "abs", "squared"), default="signed", help="Pointwise error map mode. Default: signed")
-    fc.add_argument("--summary_step", default="final", help="Step for final grid/spectra plots: final/latest or an integer. Default: final")
-    fc.add_argument("--spherical_method", choices=("spherical", "fft"), default="spherical", help="Method for forecast_spectra_final.png. Default: spherical")
-    fc.add_argument("--grid_cols", type=int, default=3, help="Maximum columns in spatial grids. Default: 3")
-    fc.add_argument("--rollout_dir", default="./rollout_results", help="Directory for per-optimizer rollout outputs. Default: ./rollout_results")
-    fc.add_argument("--outdir", default="./figures_forecast", help="Directory for final forecast figures. Default: ./figures_forecast")
-    fc.add_argument("--device", default=None, help="Optional real-rollout device, e.g. cuda or cpu. Default: auto")
-    fc.add_argument("--synthetic_demo", action="store_true", help="Generate artificial rollout data instead of loading real checkpoints. For tests only.")
-    fc.set_defaults(func=run_forecast)
 
-    return parser
+    if output is None:
+        plt.show()
+    else:
+        output = Path(output)
+        ext = output.suffix.lower()
+        if ext == ".gif":
+            writer = manimation.PillowWriter(fps=fps)
+        else:
+            writer = manimation.FFMpegWriter(fps=fps, bitrate=1800)
+        print(f"Saving animation to {output} ...")
+        ani.save(str(output), writer=writer, dpi=120)
+        print(f"Saved: {output}")
+
+    plt.close(fig)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    args.func(args)
+def make_spectral_image_animation(
+    frames: Sequence[Tuple[int, Sequence[Tuple[str, Path]]]],
+    fps: int = 8,
+    output: Optional[Union[str, Path]] = None,
+) -> None:
+    """Animate saved per-optimizer spectral-analysis PNGs over rollout steps."""
+    if not frames:
+        raise ValueError("spectral frames are empty - nothing to animate.")
+
+    first_step, first_panels = frames[0]
+    n_panels = len(first_panels)
+    n_cols = min(3, n_panels)
+    n_rows = int(math.ceil(n_panels / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5.0 * n_cols, 4.2 * n_rows + 0.7), squeeze=False)
+    fig.patch.set_facecolor("#111827")
+
+    images = []
+    for ax, (label, path) in zip(axes.ravel(), first_panels):
+        img = plt.imread(path)
+        im = ax.imshow(img)
+        ax.set_title(label, color="white", fontsize=11, fontweight="bold", pad=6)
+        ax.axis("off")
+        ax.set_facecolor("#111827")
+        images.append(im)
+    for ax in axes.ravel()[n_panels:]:
+        ax.axis("off")
+        ax.set_facecolor("#111827")
+
+    # This mode displays the exact spectra PNGs emitted by forecast.py for each
+    # optimizer.  It intentionally treats those PNGs as image panels rather than
+    # recomputing spectra, preserving the original per-optimizer diagnostics.
+    fig.suptitle("Spectral analysis comparison", color="white", fontsize=15, fontweight="bold")
+    step_label = fig.text(
+        0.5, 0.955,
+        f"rollout step {first_step}",
+        ha="center", va="top",
+        color="white", fontsize=12, fontweight="bold",
+    )
+    fig.tight_layout(rect=[0, 0.0, 1, 0.93])
+
+    def update(frame_index: int):
+        step, panels = frames[frame_index]
+        for im, (_, path) in zip(images, panels):
+            im.set_data(plt.imread(path))
+        step_label.set_text(f"rollout step {step}")
+        return [*images, step_label]
+
+    ani = manimation.FuncAnimation(fig, update, frames=len(frames), interval=1000 / fps, blit=False)
+    _save_or_show_animation(fig, ani, output, fps=fps, dpi=110)
 
 
-if __name__ == "__main__":
-    main()
+def make_combined_spectral_animation(
+    frames: Sequence[Sequence[roll.FieldSnapshot]],
+    fps: int = 8,
+    output: Optional[Union[str, Path]] = None,
+    config_path: Union[str, Path] = "config_paradis.yaml",
+) -> None:
+    """Animate all optimizer spherical-harmonic spectra in one comparison figure."""
+    if not frames:
+        raise ValueError("frames is empty - nothing to animate.")
+
+    # Build the same SHT object used by forecast.py and reuse it for every frame.
+    # The combined animation should not silently fall back to FFT: if the SWAN
+    # spherical-harmonic diagnostic cannot be constructed, the command should
+    # fail clearly so the plotted spectra are not mistaken for forecast.py output.
+    sht = roll.build_spherical_sht(config_path, frames[0][0].truth_fields.shape)
+    spectral_frames = []
+    y_values = []
+    for step_snaps in frames:
+        # Precompute spectra and global positive y-limits before constructing
+        # the animation.  Fixed log-scale limits keep optimizer differences from
+        # being hidden by per-frame autoscaling.
+        truth_spectra = roll.compute_spherical_energy_spectra(step_snaps[0].truth_fields, sht)
+        pred_spectra = [
+            (snap.label, roll.compute_spherical_energy_spectra(snap.prediction_fields, sht))
+            for snap in step_snaps
+        ]
+        spectral_frames.append((step_snaps[0].step, truth_spectra, pred_spectra))
+        for spectra in [truth_spectra, *[spec for _, spec in pred_spectra]]:
+            for key in ("rotational", "divergent", "potential", "total"):
+                values = np.asarray(spectra[key])
+                y_values.extend(values[np.isfinite(values) & (values > 0)].tolist())
+
+    spec_keys = [
+        ("rotational", "Rotational"),
+        ("divergent", "Divergent"),
+        ("potential", "Potential"),
+        ("total", "Total"),
+    ]
+    labels = [snap.label for snap in frames[0]]
+    colors = _bar_colors(max(1, len(labels)))
+    y_min = max(min(y_values) * 0.6, 1e-14) if y_values else 1e-14
+    y_max = max(y_values) * 1.6 if y_values else 1.0
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle("Combined rollout spectra comparison", fontsize=15, fontweight="bold")
+    step_label = fig.text(0.5, 0.935, "", ha="center", va="top", fontsize=11, fontweight="bold")
+
+    line_sets = []
+    for ax, (key, title) in zip(axes.ravel(), spec_keys):
+        truth_line, = ax.loglog([], [], color="black", linewidth=2.2, linestyle="--", label="Ground Truth")
+        pred_lines = []
+        for i, label in enumerate(labels):
+            line, = ax.loglog([], [], color=colors[i % len(colors)], linewidth=1.8, label=label)
+            pred_lines.append((label, line))
+        ax.set_title(title, fontweight="bold")
+        ax.set_xlabel("Wavenumber $l$")
+        ax.set_ylabel("Power spectrum")
+        ax.set_ylim(y_min, y_max)
+        ax.grid(True, which="both", alpha=0.3)
+        line_sets.append((key, truth_line, pred_lines))
+
+    handles, legend_labels = axes.ravel()[0].get_legend_handles_labels()
+    fig.legend(handles, legend_labels, loc="lower center", ncol=min(4, len(legend_labels)), frameon=False)
+    fig.tight_layout(rect=(0, 0.08, 1, 0.91))
+
+    def update(frame_index: int):
+        step, truth_spectra, pred_spectra = spectral_frames[frame_index]
+        pred_by_label = dict(pred_spectra)
+        artists = [step_label]
+        step_label.set_text(f"rollout step {step}")
+        for ax, (key, truth_line, pred_lines) in zip(axes.ravel(), line_sets):
+            k = np.asarray(truth_spectra["wavenumbers"])[1:]
+            truth_values = np.asarray(truth_spectra[key])[1:]
+            truth_line.set_data(k, truth_values)
+            artists.append(truth_line)
+            for label, line in pred_lines:
+                spectra = pred_by_label[label]
+                line.set_data(np.asarray(spectra["wavenumbers"])[1:], np.asarray(spectra[key])[1:])
+                artists.append(line)
+            if len(k) > 0:
+                ax.set_xlim(left=max(1, k[0]), right=k[-1])
+        return artists
+
+    ani = manimation.FuncAnimation(
+        fig,
+        update,
+        frames=len(spectral_frames),
+        interval=1000 / fps,
+        blit=False,
+    )
+    _save_or_show_animation(fig, ani, output, fps=fps, dpi=120)
+
+
+def _save_or_show_animation(fig: plt.Figure, ani, output: Optional[Union[str, Path]], fps: int, dpi: int) -> None:
+    """Save an animation to GIF/MP4 or show it interactively."""
+    if output is None:
+        plt.show()
+    else:
+        output = Path(output)
+        ext = output.suffix.lower()
+        if ext == ".gif":
+            writer = manimation.PillowWriter(fps=fps)
+        else:
+            writer = manimation.FFMpegWriter(fps=fps, bitrate=1800)
+        print(f"Saving animation to {output} ...")
+        ani.save(str(output), writer=writer, dpi=dpi)
+        print(f"Saved: {output}")
+    plt.close(fig)
+
+
+def _dark_colorbar(fig: plt.Figure, im, ax: plt.Axes) -> None:
+    """Attach a compact horizontal colorbar with white ticks to a dark panel."""
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, orientation="horizontal")
+    cbar.ax.tick_params(colors="white", labelsize=7)
+    cbar.outline.set_edgecolor("white")

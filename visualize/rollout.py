@@ -1,13 +1,12 @@
-#!/usr/bin/env python3
 """
-rollout_utils.py
-================
+rollout.py
+==========
 
-Backend utilities for ``visualize.py forecast``.
+Backend utilities for ``visualize forecast``.
 
 This module is intentionally not a public command-line tool.  Users should run
-``python visualize.py forecast ...``.  ``visualize.py`` calls the functions here
-to do the heavy forecast/rollout preparation.
+``python -m visualize forecast ...``.  The CLI calls the functions here to do
+the heavy forecast/rollout preparation.
 
 Design goals
 ------------
@@ -65,8 +64,6 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-# Matplotlib is used only for optional per-optimizer synthetic comparison plots.
-# Final cross-optimizer plots are created in visualize.py.
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -231,9 +228,10 @@ def run_real_rollouts(
 
     results: List[RolloutRun] = []
     for checkpoint_path, label in zip(checkpoints, labels):
-        # Resetting the seed here is the key fairness control for random
-        # forecast initial conditions.  It makes the IC sequence repeat for
-        # every optimizer.
+        # Reset the forecast-time RNG before each optimizer.  forecast.py draws
+        # random ICs inside _run_single_ic_inference; reseeding here makes every
+        # optimizer consume the same IC sequence while keeping this evaluation
+        # seed independent from the seed used during training.
         pl.seed_everything(seed, workers=True)
 
         output_dir = rollout_dir / sanitize_label(label)
@@ -419,6 +417,9 @@ def create_synthetic_rollouts(
                     save_individual_comparison_png(
                         out / f"ic{ic:03d}_comparison_{step:0{pad_width}d}.png", pred, truth, channel_index=1, step=step
                     )
+                    save_individual_spectra_png(
+                        out / f"ic{ic:03d}_spectra_{step:0{pad_width}d}.png", pred, truth, step=step, label=label
+                    )
 
         summary = aggregate_step_metrics(all_step_metrics, ml_times, solver_times)
         pd.DataFrame([summary]).to_csv(out / "metrics.csv", index=False)
@@ -494,6 +495,38 @@ def save_individual_comparison_png(path: Path, pred: np.ndarray, truth: np.ndarr
     plt.close(fig)
 
 
+def save_individual_spectra_png(path: Path, pred: np.ndarray, truth: np.ndarray, step: int, label: str) -> None:
+    """Save a simple forecast.py-style spectra PNG for synthetic data."""
+    # Synthetic rollouts do not have a shallow-water solver or SHT attached, so
+    # this helper deliberately uses the FFT fallback only to create test images
+    # for the split spectral animation path.
+    pred_spectra = compute_simple_energy_spectra(pred)
+    truth_spectra = compute_simple_energy_spectra(truth)
+    titles = [
+        "Rotational kinetic energy",
+        "Divergent kinetic energy",
+        "Potential energy",
+        "Total energy",
+    ]
+    keys = ["rotational", "divergent", "potential", "total"]
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7.5))
+    for ax, title, key in zip(axes.ravel(), titles, keys):
+        k = truth_spectra["wavenumbers"][1:]
+        ax.loglog(k, pred_spectra[key][1:], "b-", linewidth=1.8, label=f"{label} prediction")
+        ax.loglog(k, truth_spectra[key][1:], "r--", linewidth=1.8, label="Ground truth")
+        ax.set_title(f"{title} (t={step})", fontsize=10, fontweight="bold")
+        ax.set_xlabel("Wavenumber $l$")
+        ax.set_ylabel("Power spectrum")
+        ax.grid(True, which="both", alpha=0.3)
+        if len(k) > 0:
+            ax.set_xlim(left=max(1, k[0]), right=k[-1])
+        ax.legend(fontsize=8)
+    fig.suptitle(f"Synthetic spectra: {label} step {step}", fontsize=12, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Loading and preparing rollout data for plotting
 # ---------------------------------------------------------------------------
@@ -511,7 +544,7 @@ def load_rollout_runs(rollout_dirs: Sequence[str | Path], labels: Sequence[str])
             raise FileNotFoundError(f"Missing metrics.csv in {rollout_path}")
         if not per_step_path.exists():
             raise FileNotFoundError(
-                f"Missing per_step_metrics.csv in {rollout_path}. This file is written by rollout_utils.py."
+                f"Missing per_step_metrics.csv in {rollout_path}. This file is written by visualize.rollout."
             )
         metrics_df = pd.read_csv(metrics_path)
         metrics = {col: float(metrics_df.iloc[0][col]) for col in metrics_df.columns}
@@ -538,18 +571,7 @@ def saved_rollout_steps(autoreg_steps: int, output_freq: int) -> List[int]:
 def parse_saved_steps(rollout_dir: str | Path) -> List[int]:
     """Parse saved prediction steps from one rollout directory."""
     rollout_dir = Path(rollout_dir)
-    steps = []
-    for path in rollout_dir.glob("ic000_prediction_*.pt"):
-        match = re.search(r"prediction_(\d+)\.pt$", path.name)
-        if match:
-            steps.append(int(match.group(1)))
-    if not steps:
-        # Also accept non-prefixed files for users who manually create outputs.
-        for path in rollout_dir.glob("prediction_*.pt"):
-            match = re.search(r"prediction_(\d+)\.pt$", path.name)
-            if match:
-                steps.append(int(match.group(1)))
-    return sorted(set(steps))
+    return sorted({step for step, _ in _preferred_step_files(rollout_dir, "prediction", ".pt")})
 
 
 def common_summary_step(rollout_dirs: Sequence[str | Path], requested: str) -> int:
@@ -577,11 +599,8 @@ def common_summary_step(rollout_dirs: Sequence[str | Path], requested: str) -> i
 def load_field_snapshot(rollout_dir: str | Path, label: str, step: int) -> FieldSnapshot:
     """Load prediction/truth field tensors for one label and step."""
     rollout_dir = Path(rollout_dir)
-    # Forecast.py pads using len(str(autoreg_steps)), so we should not assume a
-    # particular zero-padding width here.  Instead, parse the integer step from
-    # every candidate filename and keep the exact match.
-    pred_matches = [p for p in rollout_dir.glob("*prediction_*.pt") if _path_step(p) == step]
-    truth_matches = [p for p in rollout_dir.glob("*truth_*.pt") if _path_step(p) == step]
+    pred_matches = [p for s, p in _preferred_step_files(rollout_dir, "prediction", ".pt") if s == step]
+    truth_matches = [p for s, p in _preferred_step_files(rollout_dir, "truth", ".pt") if s == step]
     if not pred_matches or not truth_matches:
         raise FileNotFoundError(f"Could not find prediction/truth .pt files for step {step} in {rollout_dir}")
 
@@ -591,8 +610,41 @@ def load_field_snapshot(rollout_dir: str | Path, label: str, step: int) -> Field
 
 
 def _path_step(path: Path) -> Optional[int]:
-    match = re.search(r"_(\d+)\.pt$", path.name)
+    """Extract the numeric rollout step from saved tensor/PNG filenames."""
+    match = re.search(r"_(\d+)\.(?:pt|png)$", path.name)
     return int(match.group(1)) if match else None
+
+
+def _preferred_step_files(rollout_dir: Path, kind: str, suffix: str) -> List[Tuple[int, Path]]:
+    """Return one consistent filename-padding family for saved rollout files.
+
+    A rollout folder can contain stale files from a shorter test run, for
+    example ``ic000_prediction_0.pt`` next to real-run
+    ``ic000_prediction_000.pt``.  Mixing those families can make animations jump
+    between unrelated rollouts.  Prefer the widest step-number padding, which is
+    the convention used by longer real forecasts, and keep only that family.
+    """
+    candidates: List[Tuple[int, int, Path]] = []
+    patterns = [f"ic000_{kind}_*{suffix}", f"{kind}_*{suffix}"]
+    for pattern in patterns:
+        for path in rollout_dir.glob(pattern):
+            match = re.search(rf"{re.escape(kind)}_(\d+){re.escape(suffix)}$", path.name)
+            if match:
+                digits = match.group(1)
+                candidates.append((int(digits), len(digits), path))
+        if candidates:
+            break
+
+    if not candidates:
+        return []
+
+    # Width is a practical proxy for one coherent run.  A real 100-step rollout
+    # writes 000/010/.../100, while short smoke tests may leave 0/2/4 behind in
+    # the same directory.  Choosing the widest family avoids frame jumps caused
+    # by mixing old and new outputs.
+    preferred_width = max(width for _, width, _ in candidates)
+    preferred = [(step, path) for step, width, path in candidates if width == preferred_width]
+    return sorted(preferred, key=lambda item: (item[0], item[1].name))
 
 
 def load_field_pt(path: str | Path) -> np.ndarray:
@@ -618,6 +670,80 @@ def load_snapshots_for_step(rollout_runs: Sequence[RolloutRun], summary_step: st
     """Load final/common-step prediction/truth snapshots for several runs."""
     step = common_summary_step([run.rollout_dir for run in rollout_runs], summary_step)
     return [load_field_snapshot(run.rollout_dir, run.label, step) for run in rollout_runs]
+
+
+def load_animation_frames(
+    rollout_dirs: Sequence[str | Path],
+    labels: Sequence[str],
+) -> List[List[FieldSnapshot]]:
+    """Load all saved snapshots across every common step for animation.
+
+    Returns a list of frames ordered by step.  Each frame is a list of
+    ``FieldSnapshot`` objects — one per optimizer — all at the same rollout
+    step.  Only steps present in every rollout directory are included so the
+    animation is always consistent across optimizers.
+    """
+    if len(rollout_dirs) != len(labels):
+        raise ValueError("Expected the same number of rollout_dirs and labels.")
+
+    # Animate only the intersection of saved steps.  This keeps every optimizer
+    # synchronized even when one rollout has fewer saved tensors than another.
+    per_run_steps = [set(parse_saved_steps(d)) for d in rollout_dirs]
+    if any(not steps for steps in per_run_steps):
+        raise FileNotFoundError(
+            "Could not find saved prediction_*.pt files in one or more rollout directories. "
+            "Run 'python -m visualize forecast' first."
+        )
+
+    common_steps = sorted(set.intersection(*per_run_steps))
+    if not common_steps:
+        raise ValueError("No common saved rollout steps found across all rollout directories.")
+
+    return [
+        [load_field_snapshot(d, l, step) for d, l in zip(rollout_dirs, labels)]
+        for step in common_steps
+    ]
+
+
+def parse_saved_spectra_steps(rollout_dir: str | Path) -> List[int]:
+    """Parse saved spectra PNG steps from one rollout directory."""
+    rollout_dir = Path(rollout_dir)
+    return sorted({step for step, _ in _preferred_step_files(rollout_dir, "spectra", ".png")})
+
+
+def load_spectral_animation_frames(
+    rollout_dirs: Sequence[str | Path],
+    labels: Sequence[str],
+) -> List[Tuple[int, List[Tuple[str, Path]]]]:
+    """Load saved per-optimizer spectra PNG paths across every common step."""
+    if len(rollout_dirs) != len(labels):
+        raise ValueError("Expected the same number of rollout_dirs and labels.")
+
+    # The split spectral GIF is built from saved PNGs, not recomputed spectra.
+    # Using the common step intersection preserves a one-to-one correspondence
+    # with the field animation timeline.
+    per_run_steps = [set(parse_saved_spectra_steps(d)) for d in rollout_dirs]
+    if any(not steps for steps in per_run_steps):
+        raise FileNotFoundError(
+            "Could not find saved spectra_*.png files in one or more rollout directories. "
+            "Run 'python -m visualize forecast' first with spectral analysis enabled."
+        )
+
+    common_steps = sorted(set.intersection(*per_run_steps))
+    if not common_steps:
+        raise ValueError("No common saved spectral-analysis steps found across all rollout directories.")
+
+    frames: List[Tuple[int, List[Tuple[str, Path]]]] = []
+    for step in common_steps:
+        panels: List[Tuple[str, Path]] = []
+        for rollout_dir, label in zip(rollout_dirs, labels):
+            rollout_path = Path(rollout_dir)
+            matches = [p for s, p in _preferred_step_files(rollout_path, "spectra", ".png") if s == step]
+            if not matches:
+                raise FileNotFoundError(f"Could not find spectra PNG for step {step} in {rollout_path}")
+            panels.append((label, sorted(matches)[0]))
+        frames.append((step, panels))
+    return frames
 
 
 def metric_column(error_metric: str) -> str:
@@ -715,6 +841,9 @@ def build_spherical_sht(config_path: str | Path, field_shape: Sequence[int], dev
     except Exception as exc:
         raise RuntimeError("Could not import forecast.py for spherical-harmonic spectra.") from exc
 
+    # Construct a minimal forecast dataset solely to obtain its solver.sht.  This
+    # mirrors forecast.py instead of duplicating low-level torch_harmonics setup,
+    # which keeps the diagnostic definition aligned with the original script.
     config = forecast.load_config(str(config_path))
     nlat, nlon = int(field_shape[-2]), int(field_shape[-1])
     data_config = config["data"]
@@ -748,6 +877,9 @@ def compute_spherical_energy_spectra(fields: np.ndarray, sht) -> Dict[str, np.nd
             device = next(sht.buffers()).device
         except (AttributeError, StopIteration):
             device = torch.device("cpu")
+    # Saved rollout tensors are stored as numpy arrays with shape
+    # (channels, nlat, nlon).  forecast.compute_energy_spectra expects a batch
+    # dimension, so add one without changing the field values.
     tensor = torch.as_tensor(fields, dtype=torch.float32, device=device)
     if tensor.ndim == 3:
         tensor = tensor.unsqueeze(0)

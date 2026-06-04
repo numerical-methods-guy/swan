@@ -2,17 +2,10 @@
 
 This toolkit compares different optimizer runs in the SWAN project.
 
-It provides one public user-facing script:
+All commands are exposed through the `visualize` Python package:
 
-```text
-visualize.py
-```
-
-and two backend helper modules:
-
-```text
-history_utils.py
-rollout_utils.py
+```bash
+python -m visualize <command> [options]
 ```
 
 It also includes two optional bash convenience scripts:
@@ -22,59 +15,28 @@ train_all_optimizers.sh
 visualize_all_optimizers.sh
 ```
 
-Users should normally interact only with `visualize.py`.
-
 ---
 
-## 1. File Overview
+## 1. Package Overview
 
-### `visualize.py`
-
-Public command-line interface and plotting code.
-
-It provides two commands:
-
-```bash
-python visualize.py plot_history ...
-python visualize.py forecast ...
+```text
+visualize/
+  history.py   — load and prepare training/validation scalar histories
+  rollout.py   — load, generate, and prepare forecast rollout data
+  plots.py     — all matplotlib figure-building functions
+  _cli.py      — argument parsing and command entry points
 ```
 
-Use `plot_history` for TensorBoard training/validation curves.
+Users do not import these sub-modules directly. All interaction goes through
+the three commands below.
 
-Use `forecast` for post-training rollout comparison from trained checkpoints.
+### Commands
 
----
-
-### `history_utils.py`
-
-Backend for `plot_history`.
-
-It handles:
-
-- finding TensorBoard event files;
-- reading TensorBoard scalar histories;
-- reading CSV fallback histories if TensorBoard is unavailable;
-- mapping user-friendly metric names such as `l2` to real TensorBoard tags such as `val_l2`;
-- preparing learning-curve and hitting-curve data.
-
-Users do not run this file directly.
-
----
-
-### `rollout_utils.py`
-
-Backend for `forecast`.
-
-It handles:
-
-- finding checkpoints inside training run folders;
-- running or preparing rollout evaluation;
-- saving per-optimizer rollout outputs;
-- saving per-step forecast metrics;
-- loading saved forecast fields;
-- preparing spectra and grid-wise comparison data.
-
-Users do not run this file directly.
+```bash
+python -m visualize plot_history ...   # training/validation history curves
+python -m visualize forecast ...       # post-training rollout comparison
+python -m visualize animate ...        # animated rollout comparison (GIF/MP4)
+```
 
 ---
 
@@ -294,7 +256,7 @@ Use this command to compare TensorBoard training/validation histories.
 ## Basic Example
 
 ```bash
-python visualize.py plot_history \
+python -m visualize plot_history \
   --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
   --labels Adam AdamW MUD Muon SGD \
   --stage validation \
@@ -381,7 +343,7 @@ one curve per optimizer
 Example:
 
 ```bash
-python visualize.py plot_history \
+python -m visualize plot_history \
   --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
   --labels Adam AdamW MUD Muon SGD \
   --stage validation \
@@ -416,7 +378,7 @@ The code uses cumulative best error, so if validation error temporarily increase
 Example:
 
 ```bash
-python visualize.py plot_history \
+python -m visualize plot_history \
   --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
   --labels Adam AdamW MUD Muon SGD \
   --stage validation \
@@ -440,7 +402,7 @@ hitting_curve_validation_time_l2.png
 To generate both training and validation plots, and both learning/hitting curves:
 
 ```bash
-python visualize.py plot_history \
+python -m visualize plot_history \
   --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
   --labels Adam AdamW MUD Muon SGD \
   --stage both \
@@ -476,7 +438,7 @@ The command finds checkpoints inside each run folder, runs autoregressive rollou
 ## Basic Example
 
 ```bash
-python visualize.py forecast \
+python -m visualize forecast \
   --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
   --labels Adam AdamW MUD Muon SGD \
   --config config_paradis.yaml \
@@ -493,7 +455,7 @@ Typical outputs:
 figures_forecast/
   forecast_error_curve_l2.png
   forecast_accuracy_bar_l2.png
-  forecast_speedup_bar.png
+  forecast_runtime_ratio_bar.png
   forecast_prediction_grid_vorticity_final.png
   forecast_error_grid_vorticity_final_signed.png
   forecast_spectra_final.png
@@ -678,19 +640,21 @@ Plots one aggregate forecast error value per optimizer, usually averaged over ro
 
 This is a bar chart, not a histogram.
 
-### 3. Speedup Bar Chart
+### 3. Runtime Ratio Bar Chart
 
 ```text
-forecast_speedup_bar.png
+forecast_runtime_ratio_bar.png
 ```
 
 Plots:
 
 ```text
-speedup_mean = solver_time_mean / ml_time_mean
+runtime_ratio = ml_time_mean / solver_time_mean
 ```
 
-Higher is better.
+Lower is better. A value of `1.0` means the ML rollout and non-ML solver took
+the same time; values above `1.0` mean the ML rollout was slower than the
+non-ML solver, and values below `1.0` mean it was faster.
 
 ### 4. Prediction Grid
 
@@ -756,7 +720,7 @@ By default this figure uses spherical-harmonic spectra for real rollouts. Pass `
 Use `--synthetic_demo` to test the plotting pipeline without real SWAN checkpoints:
 
 ```bash
-python visualize.py forecast \
+python -m visualize forecast \
   --synthetic_demo \
   --labels Adam MUD Muon SGD RMSProp AdamW \
   --autoreg_steps 20 \
@@ -797,7 +761,7 @@ The script asks whether to clear `./logs` before training. With the default conf
 ### Step 2: Plot training/validation history
 
 ```bash
-python visualize.py plot_history \
+python -m visualize plot_history \
   --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
   --labels Adam AdamW MUD Muon SGD \
   --stage both \
@@ -810,7 +774,7 @@ python visualize.py plot_history \
 ### Step 3: Plot forecast comparison
 
 ```bash
-python visualize.py forecast \
+python -m visualize forecast \
   --runs ./logs/adam/version_0 ./logs/adamw/version_0 ./logs/mud/version_0 ./logs/muon/version_0 ./logs/sgd/version_0 \
   --labels Adam AdamW MUD Muon SGD \
   --config config_paradis.yaml \
@@ -831,6 +795,125 @@ bash visualize_all_optimizers.sh
 ```
 
 That script asks whether to clear `./figures_history`, `./figures_forecast`, and `./rollout_results` before plotting.
+
+### Step 4: Animate the rollout comparison
+
+Once `forecast` has written rollout data to `./rollout_results`, you can
+animate how each optimizer's prediction evolves over time:
+
+```bash
+python -m visualize animate \
+  --labels Adam AdamW MUD Muon SGD \
+  --channel vorticity \
+  --output ./figures_forecast/rollout_fields.gif
+```
+
+Add `--show_error` to include a second row of signed error maps
+(prediction − truth) below the prediction row.
+
+The command also writes an animated spectral-analysis comparison by default.
+With the default output paths, the two GIFs are:
+
+```text
+figures_forecast/rollout_fields.gif
+figures_forecast/rollout_spectra.gif
+```
+
+By default, the spectral animation overlays all optimizers in one animated
+spherical-harmonic spectral comparison graph. Use `--split_spectral` to instead
+show each optimizer's saved spectral-analysis image separately.
+
+---
+
+# Command 3: `animate`
+
+Use this command to create an animated GIF or MP4 from pre-computed rollout
+data generated by the `forecast` command.
+
+---
+
+## Basic Example
+
+```bash
+python -m visualize animate \
+  --labels Adam MUD Muon \
+  --channel vorticity \
+  --output ./figures_forecast/rollout_fields.gif
+```
+
+---
+
+## `animate` Flags
+
+| Flag | Required? | Default | Choices | Meaning |
+|---|---:|---|---|---|
+| `--labels` | yes, unless `--synthetic_demo` | synthetic defaults to `Adam MUD Muon` | strings | Optimizer labels matching subfolders in `--rollout_dir`. |
+| `--rollout_dir` | no | `./rollout_results` | path | Directory containing per-optimizer rollout folders. |
+| `--channel` | no | `vorticity` | `h`, `vorticity`, `divergence` | Field channel to animate. |
+| `--output` | no | `./figures_forecast/rollout_fields.gif` | path | Output file for field animation (.gif or .mp4). |
+| `--spectral_output` | no | derived from `--output` | path | Output file for spectral-analysis animation (.gif or .mp4). |
+| `--split_spectral` / `--split-spectral` | no | off | flag | Show each optimizer's saved spectral-analysis image separately. By default, all optimizers are combined in one spherical-harmonic graph. |
+| `--fps` | no | `8` | integer | Frames per second. |
+| `--show_error` | no | off | flag | Add a second row of signed error maps (prediction − truth). |
+| `--synthetic_demo` | no | off | flag | Generate synthetic rollout data before animating. For tests only. |
+| `--autoreg_steps` | no | `20` | integer | Autoregressive steps for synthetic demo. |
+| `--output_freq` | no | `4` | integer | Save-every-N-steps for synthetic demo. |
+| `--seed` | no | `42` | integer | Random seed for synthetic demo. |
+
+---
+
+## Animation Layout
+
+The top row always shows ground truth alongside every optimizer's prediction,
+all on the same shared color scale.
+
+```text
+Ground Truth | Opt 1 prediction | Opt 2 prediction | ...
+```
+
+With `--show_error` a second row is added:
+
+```text
+Opt 1 error  | Opt 2 error      | ...
+```
+
+Each error panel shows `prediction − truth` on a symmetric shared color scale.
+
+The spatial animation has a shared title and rollout-step subtitle. The default
+spectral animation also has a shared title and combines all optimizers into one
+animated spherical-harmonic spectral-analysis graph.
+
+```bash
+python -m visualize animate \
+  --labels Adam MUD Muon \
+  --output ./figures_forecast/rollout_fields.gif \
+  --spectral_output ./figures_forecast/rollout_spectra.gif
+```
+
+To show each optimizer's already-saved `spectra_*.png` image separately:
+
+```bash
+python -m visualize animate \
+  --labels Adam MUD Muon \
+  --split_spectral \
+  --output ./figures_forecast/rollout_fields.gif \
+  --spectral_output ./figures_forecast/rollout_spectra_split.gif
+```
+
+---
+
+## Testing Without Real Rollouts
+
+```bash
+python -m visualize animate \
+  --synthetic_demo \
+  --labels Adam MUD Muon \
+  --channel vorticity \
+  --show_error \
+  --output ./figures_forecast/rollout_fields.gif
+```
+
+This also writes `./figures_forecast/rollout_spectra.gif`.
 
 ---
 

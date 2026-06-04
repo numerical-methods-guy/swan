@@ -8,6 +8,12 @@ __pycache__/
 
 logs/
 results/
+rollout_results/
+figures/
+figures_history/
+figures_forecast/
+*.gif
+*.mp4
 
 # Local cluster/Compute Canada helpers
 CCDB_README.md
