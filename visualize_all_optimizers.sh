@@ -60,6 +60,8 @@ python visualize.py forecast \
   --labels "${labels[@]}" \
   --config config_paradis.yaml \
   --autoreg_steps 100 \
+  --spherical_method spherical\
+  --summary_step final\
   --output_freq 10 \
   --channel vorticity \
   --rollout_dir "${rollout_dir}" \

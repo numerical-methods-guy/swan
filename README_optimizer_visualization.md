@@ -518,6 +518,7 @@ figures_forecast/
 | `--error_metric` | no | `l2` | `loss`, `l1`, `l2`, `w11` | Scalar forecast metric for curves/bars (aggregated). |
 | `--error_mode` | no | `signed` | `signed`, `abs`, `squared` | Pointwise error map mode. |
 | `--summary_step` | no | `final` | `final`, `latest`, or integer | Rollout step loaded for grid and spectra plots. |
+| `--spherical_method` | no | `spherical` | `spherical`, `fft` | Spectral method for `forecast_spectra_final.png`. |
 | `--grid_cols` | no | `3` | integer | Maximum number of columns in spatial grid figures. |
 | `--rollout_dir` | no | `./rollout_results` | path | Folder for per-optimizer rollout outputs. |
 | `--outdir` | no | `./figures_forecast` | path | Folder for final comparison figures. |
@@ -589,6 +590,17 @@ Controls which saved rollout step is loaded for the spatial grids and spectra.
 `final` and `latest` both select the latest common saved step across all rollout folders. An integer selects that exact saved step.
 
 The generated filenames currently keep the suffix `final`, even when `--summary_step` is an integer. The figure titles report the actual selected step.
+
+### `--spherical_method`
+
+Controls how `forecast_spectra_final.png` computes spectra:
+
+```bash
+--spherical_method spherical
+--spherical_method fft
+```
+
+`spherical` is the default for real rollouts and uses the same spherical-harmonic diagnostic as `forecast.py`. `fft` uses the grid-based FFT fallback from `rollout_utils.py`. Synthetic demo rollouts always use the FFT fallback because they do not have a SWAN spherical-harmonic transform.
 
 ---
 
@@ -734,6 +746,8 @@ potential energy          | total energy
 ```
 
 Each subplot includes ground truth and all optimizers, with one shared legend.
+
+By default this figure uses spherical-harmonic spectra for real rollouts. Pass `--spherical_method fft` to generate the same combined plot with the grid FFT fallback instead.
 
 ---
 

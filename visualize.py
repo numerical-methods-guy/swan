@@ -269,7 +269,13 @@ def run_forecast(args: argparse.Namespace) -> None:
     plot_forecast_speedup_bar(rollout_runs, outdir)
     plot_prediction_grid(snapshots, args.channel, args.grid_cols, args.output_freq, outdir)
     plot_error_grid(snapshots, args.channel, args.error_mode, args.grid_cols, args.output_freq, outdir)
-    plot_combined_spectra(snapshots, args.output_freq, outdir)
+    sht = None
+    spectra_method = args.spherical_method
+    if spectra_method == "spherical" and not args.synthetic_demo:
+        sht = roll.build_spherical_sht(args.config, snapshots[0].truth_fields.shape, args.device)
+    elif spectra_method == "spherical":
+        spectra_method = "fft"
+    plot_combined_spectra(snapshots, args.output_freq, outdir, spectra_method=spectra_method, sht=sht)
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +518,13 @@ def _scaled_power_law(k: np.ndarray, spectrum: np.ndarray, exponent: float) -> n
     return scale * (k ** exponent)
 
 
-def plot_combined_spectra(snapshots: Sequence[roll.FieldSnapshot], output_freq: int, outdir: Path) -> None:
+def plot_combined_spectra(
+    snapshots: Sequence[roll.FieldSnapshot],
+    output_freq: int,
+    outdir: Path,
+    spectra_method: str = "fft",
+    sht=None,
+) -> None:
     """Plot one 2x2 spectral figure containing truth and all optimizers.
 
     The layout intentionally mirrors the original SWAN forecast.py spectral
@@ -520,8 +532,29 @@ def plot_combined_spectra(snapshots: Sequence[roll.FieldSnapshot], output_freq: 
     energy, and total energy.  The comparison version differs in that every
     optimizer is plotted on the same axes together with the same ground truth.
     """
-    truth_spectra = roll.compute_simple_energy_spectra(snapshots[0].truth_fields)
-    pred_spectra = [(snap.label, roll.compute_simple_energy_spectra(snap.prediction_fields)) for snap in snapshots]
+    if spectra_method == "spherical":
+        for snap in snapshots[1:]:
+            if not np.allclose(snap.truth_fields, snapshots[0].truth_fields, rtol=1e-5, atol=1e-6):
+                raise ValueError(
+                    "Combined spectra require every rollout to use the same truth fields. "
+                    f"{snap.label!r} differs from {snapshots[0].label!r}; rerun with the same "
+                    "forecast seed/config or plot each rollout's individual spectra."
+                )
+        if sht is None:
+            raise ValueError("spherical combined spectra require an SHT object.")
+        truth_spectra = roll.compute_spherical_energy_spectra(snapshots[0].truth_fields, sht)
+        pred_spectra = [
+            (snap.label, roll.compute_spherical_energy_spectra(snap.prediction_fields, sht))
+            for snap in snapshots
+        ]
+    elif spectra_method == "fft":
+        truth_spectra = roll.compute_simple_energy_spectra(snapshots[0].truth_fields)
+        pred_spectra = [
+            (snap.label, roll.compute_simple_energy_spectra(snap.prediction_fields))
+            for snap in snapshots
+        ]
+    else:
+        raise ValueError("spectra_method must be 'spherical' or 'fft'")
 
     titles = [
         "Rotational kinetic energy",
@@ -645,6 +678,7 @@ def build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--error_metric", choices=tuple(roll.ERROR_METRIC_TO_COLUMN.keys()), default="l2", help="Scalar forecast metric. Default: l2")
     fc.add_argument("--error_mode", choices=("signed", "abs", "squared"), default="signed", help="Pointwise error map mode. Default: signed")
     fc.add_argument("--summary_step", default="final", help="Step for final grid/spectra plots: final/latest or an integer. Default: final")
+    fc.add_argument("--spherical_method", choices=("spherical", "fft"), default="spherical", help="Method for forecast_spectra_final.png. Default: spherical")
     fc.add_argument("--grid_cols", type=int, default=3, help="Maximum columns in spatial grids. Default: 3")
     fc.add_argument("--rollout_dir", default="./rollout_results", help="Directory for per-optimizer rollout outputs. Default: ./rollout_results")
     fc.add_argument("--outdir", default="./figures_forecast", help="Directory for final forecast figures. Default: ./figures_forecast")

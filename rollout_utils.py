@@ -705,6 +705,55 @@ def compute_simple_energy_spectra(fields: np.ndarray) -> Dict[str, np.ndarray]:
     }
 
 
+def build_spherical_sht(config_path: str | Path, field_shape: Sequence[int], device: Optional[str] = None):
+    """Build the same spherical harmonic transform used by forecast.py."""
+    if torch is None:
+        raise RuntimeError("PyTorch is required for spherical-harmonic spectra.")
+
+    try:
+        forecast = importlib.import_module("forecast")
+    except Exception as exc:
+        raise RuntimeError("Could not import forecast.py for spherical-harmonic spectra.") from exc
+
+    config = forecast.load_config(str(config_path))
+    nlat, nlon = int(field_shape[-2]), int(field_shape[-1])
+    data_config = config["data"]
+    device_obj = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dt = data_config["dt"]
+    nsteps = dt // data_config["dt_solver"]
+    dataset = forecast.PdeDatasetWithWinds(
+        dt=dt,
+        nsteps=nsteps,
+        dims=(nlat, nlon),
+        normalize=True,
+        device=device_obj,
+    )
+    return dataset.solver.sht.to(device_obj)
+
+
+def compute_spherical_energy_spectra(fields: np.ndarray, sht) -> Dict[str, np.ndarray]:
+    """Compute spectra using forecast.py's spherical-harmonic diagnostic."""
+    if torch is None:
+        raise RuntimeError("PyTorch is required for spherical-harmonic spectra.")
+
+    try:
+        forecast = importlib.import_module("forecast")
+    except Exception as exc:
+        raise RuntimeError("Could not import forecast.py for spherical-harmonic spectra.") from exc
+
+    try:
+        device = next(sht.parameters()).device
+    except (AttributeError, StopIteration):
+        try:
+            device = next(sht.buffers()).device
+        except (AttributeError, StopIteration):
+            device = torch.device("cpu")
+    tensor = torch.as_tensor(fields, dtype=torch.float32, device=device)
+    if tensor.ndim == 3:
+        tensor = tensor.unsqueeze(0)
+    return forecast.compute_energy_spectra(tensor, sht)
+
+
 def radial_power_spectrum(field: np.ndarray) -> np.ndarray:
     """Radially average a normalized 2D FFT power spectrum.
 
