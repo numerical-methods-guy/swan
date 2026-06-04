@@ -1,16 +1,13 @@
-#!/usr/bin/env python3
 """
-history_utils.py
-================
+history.py
+==========
 
-Backend utilities for ``visualize.py plot_history``.
+Backend utilities for ``visualize plot_history``.
 
 This module deliberately contains only data loading and preparation logic for
 training/validation histories.  It does **not** create figures and it does not
 parse command-line arguments.  Keeping the TensorBoard/CSV fetching code here
-makes ``visualize.py`` easier to read: the public script can focus on the user
-interface and plotting, while this module focuses on converting raw logs into
-clean arrays.
+makes the plotting and CLI code easier to read.
 
 The implementation is intentionally close to the earlier standalone
 ``visualize.py`` behavior:

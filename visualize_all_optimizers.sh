@@ -45,7 +45,7 @@ case "${clear_outputs}" in
 esac
 
 echo "=== Plotting training history ==="
-python visualize.py plot_history \
+python -m visualize plot_history \
   --runs "${runs[@]}" \
   --labels "${labels[@]}" \
   --stage both \
@@ -55,7 +55,7 @@ python visualize.py plot_history \
   --outdir "${figures_history_dir}"
 
 echo "=== Plotting forecast comparison ==="
-python visualize.py forecast \
+python -m visualize forecast \
   --runs "${runs[@]}" \
   --labels "${labels[@]}" \
   --config config_paradis.yaml \

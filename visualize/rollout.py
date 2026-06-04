@@ -1,13 +1,12 @@
-#!/usr/bin/env python3
 """
-rollout_utils.py
-================
+rollout.py
+==========
 
-Backend utilities for ``visualize.py forecast``.
+Backend utilities for ``visualize forecast``.
 
 This module is intentionally not a public command-line tool.  Users should run
-``python visualize.py forecast ...``.  ``visualize.py`` calls the functions here
-to do the heavy forecast/rollout preparation.
+``python -m visualize forecast ...``.  The CLI calls the functions here to do
+the heavy forecast/rollout preparation.
 
 Design goals
 ------------
@@ -65,8 +64,6 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-# Matplotlib is used only for optional per-optimizer synthetic comparison plots.
-# Final cross-optimizer plots are created in visualize.py.
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -511,7 +508,7 @@ def load_rollout_runs(rollout_dirs: Sequence[str | Path], labels: Sequence[str])
             raise FileNotFoundError(f"Missing metrics.csv in {rollout_path}")
         if not per_step_path.exists():
             raise FileNotFoundError(
-                f"Missing per_step_metrics.csv in {rollout_path}. This file is written by rollout_utils.py."
+                f"Missing per_step_metrics.csv in {rollout_path}. This file is written by visualize.rollout."
             )
         metrics_df = pd.read_csv(metrics_path)
         metrics = {col: float(metrics_df.iloc[0][col]) for col in metrics_df.columns}
