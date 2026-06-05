@@ -1,8 +1,20 @@
-"""Gauss-Newton update helpers.
+"""Gauss-Newton update helpers for SWAN.
 
-This module implements experimental Gauss-Newton helpers. 
-A Gauss-Newton step needs access to the model residual function,
-so the Lightning strategy will drive it manually.
+This file contains the numerical update logic only. It is kept separate from
+the Lightning strategy so the math is not mixed with logging, checkpointing,
+or trainer-specific code.
+
+Two variants are available:
+
+* ``MatrixFreeGaussNewton`` avoids forming the full Jacobian. It uses JVP/VJP
+  products and conjugate gradient, so it is the practical default for PARADIS.
+* ``ExplicitGaussNewton`` builds the Jacobian directly. This is easier to
+  reason about, but is only meant for tiny debugging runs because memory grows
+  quickly with model size.
+
+Both variants solve a damped least-squares system based on the residual
+``prediction - target`` and return the same diagnostics through
+``GaussNewtonStats``.
 """
 
 from __future__ import annotations

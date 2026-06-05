@@ -1,4 +1,15 @@
-"""Gauss-Newton training strategy with manual batch updates."""
+"""Gauss-Newton training strategy.
+
+Most SWAN strategies receive a scalar loss, call backward, and let a PyTorch
+optimizer update the parameters. Gauss-Newton needs more context: the input
+fields, winds, targets, and rollout count are all part of the residual used in
+the update. For that reason this strategy uses the optional batch-level hook in
+``SWELightningModule`` instead of the standard loss-only path.
+
+The actual Gauss-Newton math lives in ``training.optimizers.gauss_newton``.
+This wrapper only connects it to Lightning, handles the batch unpacking, and
+logs the diagnostics.
+"""
 
 from typing import Any
 
