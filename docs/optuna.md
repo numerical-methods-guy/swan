@@ -85,6 +85,42 @@ python optuna_tune.py --config config_paradis.yaml --optimizer sgd \
 
 Use `--tune_global` only when the goal is to tune the full model/optimizer pipeline. For a controlled optimizer comparison, leave global model parameters fixed in `config_paradis.yaml` and omit `--tune_global`.
 
+## Pruning weak trials
+
+Optuna pruning is enabled by default with the median pruner. This means the first few trials run fully, then later trials can stop early if their validation loss is clearly worse than previous completed trials. The goal is to avoid spending a full training run on hyperparameters that already look poor.
+
+The default pruning settings are:
+
+```text
+--pruner median
+--pruner_startup_trials 5
+--pruner_warmup_steps 2
+--monitor val_loss
+```
+
+With these defaults, the first 5 trials are not pruned. After that, each trial gets at least 2 validation epochs before Optuna is allowed to stop it early. Since validation is checked once per epoch, pruning decisions are based on intermediate `val_loss` values.
+
+To disable pruning:
+
+```bash
+python optuna_tune.py --config config_paradis.yaml --optimizer adam \
+  --search_space optuna_search_spaces.yaml \
+  --n_trials 40 \
+  --study_name adam_no_pruning \
+  --no_pruning
+```
+
+The available pruners are:
+
+```text
+none
+median
+successive_halving
+hyperband
+```
+
+For most first-pass tuning runs, `median` is a good default. `successive_halving` and `hyperband` can be useful for larger searches, but they are more aggressive and may stop trials earlier.
+
 ## Common flags
 
 | Flag | Meaning |
@@ -97,6 +133,11 @@ Use `--tune_global` only when the goal is to tune the full model/optimizer pipel
 | `--tune_global` | Also tune the `global:` section of the search-space file. |
 | `--output_dir` | Directory for Optuna outputs. Default: `optuna_results/`. |
 | `--storage` | Optional Optuna storage backend, for example `sqlite:///optuna_sgd.db`. |
+| `--pruner` | Pruning strategy. Options: `none`, `median`, `successive_halving`, `hyperband`. Default: `median`. |
+| `--no_pruning` | Disable pruning. Equivalent to `--pruner none`. |
+| `--pruner_startup_trials` | Number of full trials before median pruning starts. Default: `5`. |
+| `--pruner_warmup_steps` | Number of validation epochs before a trial can be pruned. Default: `2`. |
+| `--monitor` | Metric used for pruning and final scoring. Default: `val_loss`. |
 
 ## Test run
 
