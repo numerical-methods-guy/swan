@@ -9,12 +9,13 @@ from training.strategies.base import TrainingStrategy
 
 class AdamStrategy(TrainingStrategy):
     automatic_optimization = True
+    optimizer_name = "adam"
 
     def configure_optimizers(self, module: pl.LightningModule):
 
         train_adam_cfg = self._optim_cfg("adam")
         train_common_cfg = self._training_cfg()
-        lr = self._resolve_lr(module)
+        lr = self._resolve_lr(module, self.optimizer_name)
 
         # Hyperparameters specific to Adam
         beta1 = train_adam_cfg.get("beta1", 0.9)
