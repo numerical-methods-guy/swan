@@ -133,6 +133,31 @@ def choose_precision(config: dict[str, Any]):
     return precision
 
 
+def build_pruner(
+    pruner_name: str,
+    startup_trials: int,
+    warmup_steps: int,
+) -> optuna.pruners.BasePruner:
+    """Create an Optuna pruner from the CLI option."""
+    if pruner_name == "none":
+        return optuna.pruners.NopPruner()
+    if pruner_name == "median":
+        return optuna.pruners.MedianPruner(
+            n_startup_trials=startup_trials,
+            n_warmup_steps=warmup_steps,
+        )
+    if pruner_name == "successive_halving":
+        return optuna.pruners.SuccessiveHalvingPruner(
+            min_resource=max(1, warmup_steps),
+        )
+    if pruner_name == "hyperband":
+        return optuna.pruners.HyperbandPruner(
+            min_resource=max(1, warmup_steps),
+        )
+
+    raise ValueError(f"Unknown pruner '{pruner_name}'")
+
+
 def build_dataloaders(config: dict[str, Any], device: torch.device):
     """Create fresh datasets and dataloaders for one Optuna trial."""
     train_dataset, val_dataset = create_datasets(config, device)
@@ -156,11 +181,42 @@ def build_dataloaders(config: dict[str, Any], device: torch.device):
     return train_dataset, val_dataset, train_loader, val_loader
 
 
+class OptunaPruningCallback(pl.Callback):
+    """Report validation loss to Optuna and stop weak trials early."""
+
+    def __init__(self, trial: optuna.Trial, monitor: str = "val_loss"):
+        self.trial = trial
+        self.monitor = monitor
+
+    def on_validation_epoch_end(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+    ) -> None:
+        value = trainer.callback_metrics.get(self.monitor)
+        if value is None:
+            return
+
+        score = (
+            float(value.detach().cpu().item())
+            if hasattr(value, "detach")
+            else float(value)
+        )
+        self.trial.report(score, step=trainer.current_epoch)
+
+        if self.trial.should_prune():
+            raise optuna.TrialPruned(
+                f"Trial pruned at epoch {trainer.current_epoch}: "
+                f"{self.monitor}={score:.6g}"
+            )
+
+
 def objective(
     trial: optuna.Trial,
     base_config: dict[str, Any],
     optimizer_name: str,
     search_space: dict[str, Any],
+    monitor: str,
 ) -> float:
     """One Optuna trial: choose hyperparameters, train once, return val_loss."""
     config = copy.deepcopy(base_config)
@@ -187,7 +243,7 @@ def objective(
     trainer = pl.Trainer(
         max_epochs=config["training"]["pretrain_epochs"],
         logger=False,
-        callbacks=[],
+        callbacks=[OptunaPruningCallback(trial, monitor=monitor)],
         enable_checkpointing=False,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
@@ -199,10 +255,10 @@ def objective(
 
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
-    val_loss = trainer.callback_metrics.get("val_loss")
+    val_loss = trainer.callback_metrics.get(monitor)
     if val_loss is None:
         val_results = trainer.validate(model, dataloaders=val_loader, verbose=False)
-        val_loss = val_results[0]["val_loss"]
+        val_loss = val_results[0][monitor]
 
     score = (
         float(val_loss.detach().cpu().item())
@@ -254,6 +310,36 @@ def main():
         help="Optional Optuna storage URL, e.g. sqlite:///optuna_sgd.db.",
     )
     parser.add_argument("--output_dir", type=str, default="optuna_results")
+    parser.add_argument(
+        "--pruner",
+        type=str,
+        choices=["none", "median", "successive_halving", "hyperband"],
+        default="median",
+        help="Early-stopping pruner for bad trials. Defaults to median.",
+    )
+    parser.add_argument(
+        "--no_pruning",
+        action="store_true",
+        help="Disable Optuna pruning. Equivalent to --pruner none.",
+    )
+    parser.add_argument(
+        "--pruner_startup_trials",
+        type=int,
+        default=5,
+        help="Number of complete trials before median pruning starts.",
+    )
+    parser.add_argument(
+        "--pruner_warmup_steps",
+        type=int,
+        default=2,
+        help="Number of validation epochs before a trial can be pruned.",
+    )
+    parser.add_argument(
+        "--monitor",
+        type=str,
+        default="val_loss",
+        help="Metric reported to Optuna for pruning and final trial score.",
+    )
 
     known_args, unknown_args = parser.parse_known_args()
 
@@ -271,6 +357,12 @@ def main():
     )
 
     sampler = optuna.samplers.TPESampler(seed=base_config["experiment"]["seed"])
+    pruner_name = "none" if known_args.no_pruning else known_args.pruner
+    pruner = build_pruner(
+        pruner_name,
+        startup_trials=known_args.pruner_startup_trials,
+        warmup_steps=known_args.pruner_warmup_steps,
+    )
 
     study = optuna.create_study(
         direction="minimize",
@@ -278,6 +370,7 @@ def main():
         storage=known_args.storage,
         load_if_exists=(known_args.storage is not None),
         sampler=sampler,
+        pruner=pruner,
     )
 
     study.optimize(
@@ -286,6 +379,7 @@ def main():
             base_config,
             optimizer_name,
             search_space,
+            known_args.monitor,
         ),
         n_trials=known_args.n_trials,
     )
