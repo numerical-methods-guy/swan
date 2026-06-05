@@ -83,7 +83,10 @@ def main():
         )
         print("=" * 70 + "\n")
 
-        logger = build_loggers(config, run_name=config["experiment"]["name"])
+        logger = build_loggers(
+            config,
+            run_name=f"{config['experiment']['name']}_{optimizer_name}",
+        )
         checkpoint_callback = ModelCheckpoint(
             monitor="val_loss",
             filename="pretrain-{epoch:02d}-{val_loss:.4f}",
@@ -135,7 +138,7 @@ def main():
 
         finetune_logger = build_loggers(
             config,
-            run_name=f"{config['experiment']['name']}_finetune",
+            run_name=f"{config['experiment']['name']}_{optimizer_name}_finetune",
         )
         finetune_checkpoint = ModelCheckpoint(
             monitor="val_loss",

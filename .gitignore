@@ -19,12 +19,7 @@ mlruns/
 # Local cluster/Compute Canada helpers
 CCDB_README.md
 env_setup.sh
-slurm_run.sh
-slurm_run_gauss_newton.sh
-slurm_run_adam_family_mlflow.sh
-slurm_run_optuna_adam.sh
-slurm_run_adam_family_mlflow.sh
-slurm_run_optuna_adam.sh
+slurm_*.sh
 slurm_logs/
 optuna_results/
 
