@@ -37,19 +37,70 @@ class MuonStrategy(TrainingStrategy):
             )
 
     def configure_optimizers(self, module: pl.LightningModule):
+        train_cfg = self._training_cfg()
         train_muon_config = self._optim_cfg("muon")
         train_adamw_config = self._optim_cfg("adamw")
-        train_common_config = self._training_cfg()
+        train_common_config = train_cfg
+        lr = train_muon_config.get("learning_rate")
+        if lr is None:
+            lr = train_cfg["learning_rate"]
+        if module.nfuture > 0:
+            lr = train_muon_config.get(
+                "finetune_learning_rate",
+                train_cfg.get("finetune_learning_rate", lr),
+            )
 
-        muon_lr = self._resolve_lr(module, "muon")
-        muon_momentum = train_muon_config.get("momentum", 0.95)
-        muon_wd = train_muon_config.get("weight_decay", 0.0)
+        muon_lr = train_cfg.get(
+            "muon_lr",
+            train_muon_config.get("muon_lr", train_muon_config.get("learning_rate", lr)),
+        )
+        muon_momentum = train_cfg.get(
+            "muon_momentum",
+            train_cfg.get(
+                "momentum",
+                train_muon_config.get(
+                    "momentum",
+                    train_muon_config.get("muon_momentum", 0.95),
+                ),
+            ),
+        )
+        muon_wd = train_cfg.get(
+            "muon_weight_decay",
+            train_muon_config.get(
+                "muon_weight_decay",
+                train_muon_config.get("weight_decay", 0.0),
+            ),
+        )
 
-        adamw_lr = self._resolve_lr(module,"adamw")
-        adamw_wd = train_adamw_config.get("weight_decay", 1e-4)
-        adamw_epsilon = train_adamw_config.get("epsilon", 1.0e-8)
-        adamw_beta1 = train_adamw_config.get("beta1", 0.9)
-        adamw_beta2 = train_adamw_config.get("beta2", 0.999)
+        adamw_lr = train_cfg.get(
+            "adamw_lr",
+            train_muon_config.get(
+                "adamw_lr",
+                train_adamw_config.get("learning_rate", lr),
+            ),
+        )
+        adamw_wd = train_cfg.get(
+            "adamw_weight_decay",
+            train_muon_config.get(
+                "adamw_weight_decay",
+                train_adamw_config.get("weight_decay", 1e-4),
+            ),
+        )
+        adamw_epsilon = train_cfg.get(
+            "adamw_epsilon",
+            train_muon_config.get(
+                "adamw_epsilon",
+                train_cfg.get("epsilon", train_adamw_config.get("epsilon", 1.0e-8)),
+            ),
+        )
+        adamw_beta1 = train_cfg.get(
+            "beta1",
+            train_muon_config.get("beta1", train_adamw_config.get("beta1", 0.9)),
+        )
+        adamw_beta2 = train_cfg.get(
+            "beta2",
+            train_muon_config.get("beta2", train_adamw_config.get("beta2", 0.999)),
+        )
 
         muon_params, other_params = split_params_for_muon(module.model)
 

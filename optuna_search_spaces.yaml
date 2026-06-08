@@ -132,6 +132,45 @@ muon:
     choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3]
 
 
+muon_new:
+  learning_rate:
+    config_key: training.muon_new.learning_rate
+    type: float
+    low: 1.0e-5
+    high: 1.0e-2
+    log: true
+
+  muon_lr:
+    config_key: training.muon_new.muon_lr
+    type: float
+    low: 1.0e-5
+    high: 1.0e-1
+    log: true
+
+  adamw_lr:
+    config_key: training.muon_new.adamw_lr
+    type: float
+    low: 1.0e-5
+    high: 1.0e-2
+    log: true
+
+  momentum:
+    config_key: training.muon_new.momentum
+    type: float
+    low: 0.8
+    high: 0.99
+
+  muon_weight_decay:
+    config_key: training.muon_new.muon_weight_decay
+    type: categorical
+    choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4]
+
+  adamw_weight_decay:
+    config_key: training.muon_new.adamw_weight_decay
+    type: categorical
+    choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3]
+
+
 mud:
   learning_rate:
     config_key: training.mud.learning_rate
@@ -140,8 +179,27 @@ mud:
     high: 1.0e-2
     log: true
 
-  weight_decay:
-    config_key: training.mud.weight_decay
+  mud_lr:
+    config_key: training.mud.mud_lr
+    type: float
+    low: 1.0e-5
+    high: 1.0e-1
+    log: true
+
+  adamw_lr:
+    config_key: training.mud.adamw_lr
+    type: float
+    low: 1.0e-5
+    high: 1.0e-2
+    log: true
+
+  mud_weight_decay:
+    config_key: training.mud.mud_weight_decay
+    type: categorical
+    choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2]
+
+  adamw_weight_decay:
+    config_key: training.mud.adamw_weight_decay
     type: categorical
     choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2]
 
@@ -153,6 +211,51 @@ mud:
 
   passes:
     config_key: training.mud.passes
+    type: int
+    low: 1
+    high: 3
+
+
+mud_new:
+  learning_rate:
+    config_key: training.mud_new.learning_rate
+    type: float
+    low: 1.0e-5
+    high: 1.0e-2
+    log: true
+
+  mud_lr:
+    config_key: training.mud_new.mud_lr
+    type: float
+    low: 1.0e-5
+    high: 1.0e-1
+    log: true
+
+  adamw_lr:
+    config_key: training.mud_new.adamw_lr
+    type: float
+    low: 1.0e-5
+    high: 1.0e-2
+    log: true
+
+  mud_weight_decay:
+    config_key: training.mud_new.mud_weight_decay
+    type: categorical
+    choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2]
+
+  adamw_weight_decay:
+    config_key: training.mud_new.adamw_weight_decay
+    type: categorical
+    choices: [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2]
+
+  beta:
+    config_key: training.mud_new.beta
+    type: float
+    low: 0.8
+    high: 0.99
+
+  passes:
+    config_key: training.mud_new.passes
     type: int
     low: 1
     high: 3

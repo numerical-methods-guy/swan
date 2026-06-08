@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import ast
 import math
-from typing import Iterable, Tuple
+from typing import Iterable, Optional, Tuple
 
 import pytorch_lightning as pl
 import torch
 
 from training.strategies.base import TrainingStrategy
+
+
+def _resolve_flat_lr(train_cfg: dict, module: pl.LightningModule) -> float:
+    lr = train_cfg["learning_rate"]
+    if module.nfuture > 0:
+        lr = train_cfg.get("finetune_learning_rate", lr)
+    return lr
 
 
 @torch.no_grad()
@@ -45,11 +52,16 @@ class MUDOptimizer(torch.optim.Optimizer):
         mud_params: Iterable[torch.nn.Parameter],
         adamw_params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
+        mud_lr: Optional[float] = None,
+        adamw_lr: Optional[float] = None,
         weight_decay: float = 1e-2,
+        mud_weight_decay: Optional[float] = None,
+        adamw_weight_decay: Optional[float] = None,
         beta_mud: float = 0.95,
         adamw_betas: Tuple[float, float] = (0.9, 0.95),
         mud_passes: int = 1,
         eps: float = 1e-8,
+        adamw_eps: Optional[float] = None,
     ):
         self._eps = float(eps)
         self._mud_passes = int(mud_passes)
@@ -59,20 +71,28 @@ class MUDOptimizer(torch.optim.Optimizer):
 
         mud_params = list(mud_params)
         adamw_params = list(adamw_params)
+        mud_lr = lr if mud_lr is None else mud_lr
+        adamw_lr = lr if adamw_lr is None else adamw_lr
+        mud_weight_decay = weight_decay if mud_weight_decay is None else mud_weight_decay
+        adamw_weight_decay = (
+            weight_decay if adamw_weight_decay is None else adamw_weight_decay
+        )
+        adamw_eps = eps if adamw_eps is None else adamw_eps
 
         param_groups = [
             dict(
                 params=mud_params,
-                lr=lr,
-                weight_decay=weight_decay,
+                lr=mud_lr,
+                weight_decay=mud_weight_decay,
                 beta_mud=beta_mud,
                 use_mud=True,
             ),
             dict(
                 params=adamw_params,
-                lr=lr,
-                weight_decay=weight_decay,
+                lr=adamw_lr,
+                weight_decay=adamw_weight_decay,
                 adamw_betas=adamw_betas,
+                eps=adamw_eps,
                 use_mud=False,
             ),
         ]
@@ -128,7 +148,7 @@ class MUDOptimizer(torch.optim.Optimizer):
         wd = float(group["weight_decay"])
         b1, b2 = group.get("adamw_betas", (0.9, 0.95))
         b1, b2 = float(b1), float(b2)
-        eps = self._eps
+        eps = float(group.get("eps", self._eps))
 
         for p in group["params"]:
             if p.grad is None:
@@ -174,21 +194,21 @@ def split_params_for_mud(model: torch.nn.Module) -> tuple[list, list]:
     return mud_params, adamw_params
 
 
-# def _resolve_adamw_betas(train_cfg: dict) -> Tuple[float, float]:
-#     raw_betas = train_cfg.get("adamw_betas", None)
+def _resolve_adamw_betas(train_cfg: dict) -> Tuple[float, float]:
+    raw_betas = train_cfg.get("adamw_betas", None)
 
-#     if isinstance(raw_betas, str):
-#         try:
-#             raw_betas = ast.literal_eval(raw_betas)
-#         except (ValueError, SyntaxError):
-#             raw_betas = None
+    if isinstance(raw_betas, str):
+        try:
+            raw_betas = ast.literal_eval(raw_betas)
+        except (ValueError, SyntaxError):
+            raw_betas = None
 
-#     if isinstance(raw_betas, (tuple, list)) and len(raw_betas) == 2:
-#         return float(raw_betas[0]), float(raw_betas[1])
+    if isinstance(raw_betas, (tuple, list)) and len(raw_betas) == 2:
+        return float(raw_betas[0]), float(raw_betas[1])
 
-#     beta1 = train_cfg.get("beta1", 0.9)
-#     beta2 = train_cfg.get("beta2", 0.95)
-#     return float(beta1), float(beta2)
+    beta1 = train_cfg.get("beta1", 0.9)
+    beta2 = train_cfg.get("beta2", 0.95)
+    return float(beta1), float(beta2)
 
 
 class MudStrategy(TrainingStrategy):
@@ -196,29 +216,74 @@ class MudStrategy(TrainingStrategy):
     automatic_optimization = True
 
     def configure_optimizers(self, module: pl.LightningModule):
-        train_common_cfg = self._training_cfg()
+        train_cfg = self._training_cfg()
+        train_common_cfg = train_cfg
         train_mud_cfg = self._optim_cfg("mud")
         train_adamw_cfg = self._optim_cfg("adamw")
-        lr = self._resolve_lr(module, "mud")
+        lr = train_mud_cfg.get("learning_rate")
+        if lr is None:
+            lr = train_cfg["learning_rate"]
+        if module.nfuture > 0:
+            lr = train_mud_cfg.get(
+                "finetune_learning_rate",
+                train_cfg.get("finetune_learning_rate", lr),
+            )
+        mud_lr = train_cfg.get("mud_lr", train_mud_cfg.get("mud_lr", lr))
+        adamw_lr = train_cfg.get(
+            "adamw_lr",
+            train_mud_cfg.get(
+                "adamw_lr",
+                train_adamw_cfg.get("learning_rate", lr),
+            ),
+        )
 
         # Common parameters
         milestones = train_common_cfg.get("lr_milestones", None)
         gamma = train_common_cfg.get("lr_gamma", 0.5)
         cosine_eta_min = train_common_cfg.get("cosine_eta_min", None)
 
-        # The paper implementation uses one lr and one weight_decay for both
-        # MUD parameters
-        weight_decay = train_mud_cfg.get("weight_decay", 1e-2)
-        mud_beta = train_mud_cfg.get("beta", 0.95)
-        mud_passes = train_mud_cfg.get("mud_passes", 1)
-        mud_eps = train_mud_cfg.get("mud_eps", 1e-8)
+        # Shared weight_decay remains a fallback when split MUD/AdamW values are absent.
+        weight_decay = train_cfg.get(
+            "weight_decay",
+            train_mud_cfg.get("weight_decay", 1e-2),
+        )
+        mud_wd = train_cfg.get(
+            "mud_weight_decay",
+            train_mud_cfg.get("mud_weight_decay", weight_decay),
+        )
+        adamw_wd = train_cfg.get(
+            "adamw_weight_decay",
+            train_mud_cfg.get(
+                "adamw_weight_decay",
+                train_adamw_cfg.get("weight_decay", weight_decay),
+            ),
+        )
+        mud_beta = train_cfg.get(
+            "beta_mud",
+            train_cfg.get(
+                "mud_beta",
+                train_mud_cfg.get("beta", train_mud_cfg.get("beta_mud", 0.95)),
+            ),
+        )
+        mud_passes = train_cfg.get(
+            "mud_passes",
+            train_mud_cfg.get(
+                "passes",
+                train_mud_cfg.get("mud_passes", 1),
+            ),
+        )
+        mud_eps = train_cfg.get("mud_eps", train_mud_cfg.get("mud_eps", 1e-8))
 
-        # Adam parameters
-        adamw_beta1 = train_adamw_cfg.get("beta1", 0.9)
-        adamw_beta2 = train_adamw_cfg.get("beta1", 0.999)
-        # adamw_epsilon = train_adamw_cfg.get("epsilon", 1.0e-8)
-        # adamw_weight_decay = train_adamw_cfg.get("weight_decay", 0.01)
-
+        adamw_beta1, adamw_beta2 = _resolve_adamw_betas(
+            {**train_adamw_cfg, **train_cfg}
+        )
+        adamw_epsilon = train_cfg.get(
+            "adamw_epsilon",
+            train_mud_cfg.get(
+                "adamw_epsilon",
+                train_adamw_cfg.get("epsilon", mud_eps),
+            ),
+        )
 
         mud_params, adamw_params = split_params_for_mud(module.model)
         print(
@@ -231,11 +296,16 @@ class MudStrategy(TrainingStrategy):
             mud_params=mud_params,
             adamw_params=adamw_params,
             lr=lr,
+            mud_lr=mud_lr,
+            adamw_lr=adamw_lr,
             weight_decay=weight_decay,
+            mud_weight_decay=mud_wd,
+            adamw_weight_decay=adamw_wd,
             beta_mud=mud_beta,
             adamw_betas=(adamw_beta1,adamw_beta2),
             mud_passes=mud_passes,
             eps=mud_eps,
+            adamw_eps=adamw_epsilon,
         )
 
 
