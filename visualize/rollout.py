@@ -66,6 +66,7 @@ import pandas as pd
 
 import matplotlib
 matplotlib.use("Agg")
+from visualize import mpl_style  # noqa: F401  # apply M2PI report typography
 import matplotlib.pyplot as plt
 
 try:  # torch is available in the SWAN environment and in this execution image.

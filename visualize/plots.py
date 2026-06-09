@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
+from visualize import mpl_style  # noqa: F401  # apply M2PI report typography
 import matplotlib.pyplot as plt
 import matplotlib.animation as manimation
 from matplotlib.ticker import ScalarFormatter
@@ -709,6 +710,39 @@ def plot_combined_spectra_percent_difference(
 # Rollout animation
 # ---------------------------------------------------------------------------
 
+ANIMATION_MAX_COLS = 3
+ANIMATION_PANEL_W = 4.0
+ANIMATION_PANEL_H = 3.4
+_ANIMATION_DARK_BG = "#0d1117"
+
+
+def _compact_grid_shape(n_panels: int, max_cols: int = ANIMATION_MAX_COLS) -> Tuple[int, int]:
+    """Return a roughly square grid with at most ``max_cols`` columns."""
+    if n_panels < 1:
+        raise ValueError("n_panels must be >= 1")
+    n_cols = min(max_cols, n_panels)
+    n_rows = int(math.ceil(n_panels / n_cols))
+    return n_rows, n_cols
+
+
+def _init_animation_panel_axes(
+    axes_grid: np.ndarray,
+    n_rows: int,
+    n_cols: int,
+    n_panels: int,
+) -> List[plt.Axes]:
+    """Activate the first ``n_panels`` cells in a grid and hide the rest."""
+    active: List[plt.Axes] = []
+    for idx, ax in enumerate(axes_grid.ravel()):
+        if idx < n_panels:
+            ax.axis("off")
+            ax.set_facecolor(_ANIMATION_DARK_BG)
+            active.append(ax)
+        else:
+            ax.set_visible(False)
+    return active
+
+
 def make_rollout_animation(
     frames: Sequence[Sequence[roll.FieldSnapshot]],
     channel: str,
@@ -718,10 +752,10 @@ def make_rollout_animation(
 ) -> None:
     """Create a multi-optimizer comparison animation from pre-computed rollouts.
 
-    Each frame is a timestep.  The top row shows ground truth alongside every
-    optimizer's prediction on a shared colorscale.  When ``show_error=True`` a
-    second row shows the signed pointwise error (prediction − truth) for each
-    optimizer on a shared error colorscale.
+    Each frame is a timestep.  Ground truth and optimizer predictions are shown
+    in a compact grid (at most three columns) instead of one very wide row.
+    When ``show_error=True``, a second grid below shows signed pointwise error
+    maps (prediction − truth) for each optimizer on a shared error colorscale.
 
     Parameters
     ----------
@@ -769,60 +803,77 @@ def make_rollout_animation(
             abs(np.nanpercentile(all_errors, 98)),
         ))
 
-    # Layout: top row = Truth + N optimizer predictions,
-    #         bottom row (optional) = N error maps.
-    n_rows = 2 if show_error else 1
-    n_cols = 1 + n_opts  # truth + one column per optimizer
+    # Compact grid layout: at most three columns so five optimizers do not
+    # produce an unwieldy 1x6 strip.  Static forecast grids already use the
+    # same column cap via --grid_cols.
+    n_pred_panels = 1 + n_opts
+    pred_rows, pred_cols = _compact_grid_shape(n_pred_panels)
+    if show_error:
+        err_rows, err_cols = _compact_grid_shape(n_opts)
+        fig_rows = pred_rows + err_rows
+        fig_cols = max(pred_cols, err_cols)
+    else:
+        err_rows = err_cols = 0
+        fig_rows, fig_cols = pred_rows, pred_cols
 
-    panel_w, panel_h = 4.2, 3.6
-    fig_w = panel_w * n_cols
-    fig_h = panel_h * n_rows + 0.9  # extra for title
+    fig_w = ANIMATION_PANEL_W * fig_cols
+    fig_h = ANIMATION_PANEL_H * fig_rows + 0.9
 
-    fig = plt.figure(figsize=(fig_w, fig_h))
-    fig.patch.set_facecolor("#0d1117")
+    fig, axes = plt.subplots(fig_rows, fig_cols, figsize=(fig_w, fig_h), squeeze=False)
+    fig.patch.set_facecolor(_ANIMATION_DARK_BG)
+    for ax in axes.ravel():
+        ax.axis("off")
+        ax.set_facecolor(_ANIMATION_DARK_BG)
 
-    axes = fig.subplots(n_rows, n_cols, squeeze=False)
-    for row_axes in axes:
-        for ax in row_axes:
-            ax.axis("off")
-            ax.set_facecolor("#0d1117")
+    pred_axes = _init_animation_panel_axes(axes[:pred_rows, :pred_cols], pred_rows, pred_cols, n_pred_panels)
+    for ax in axes[:pred_rows, pred_cols:fig_cols].ravel():
+        ax.set_visible(False)
 
-    # Top row: truth + predictions.
-    im_truth = axes[0][0].imshow(
-        np.zeros_like(frames[0][0].truth_fields[ch]),
-        cmap="twilight_shifted", vmin=vmin_field, vmax=vmax_field,
-        origin="upper", aspect="auto",
-    )
-    axes[0][0].set_title("Ground Truth", color="white", fontsize=11, fontweight="bold", pad=6)
-    _dark_colorbar(fig, im_truth, axes[0][0])
-
+    panel_titles = ["Ground Truth", *labels]
+    panel_fields = [
+        frames[0][0].truth_fields[ch],
+        *[snap.prediction_fields[ch] for snap in frames[0]],
+    ]
+    im_truth = None
     im_preds = []
-    for col, label in enumerate(labels):
-        im = axes[0][col + 1].imshow(
-            np.zeros_like(frames[0][col].prediction_fields[ch]),
-            cmap="twilight_shifted", vmin=vmin_field, vmax=vmax_field,
-            origin="upper", aspect="auto",
+    for ax, title, field in zip(pred_axes, panel_titles, panel_fields):
+        im = ax.imshow(
+            np.zeros_like(field),
+            cmap="twilight_shifted",
+            vmin=vmin_field,
+            vmax=vmax_field,
+            origin="upper",
+            aspect="auto",
         )
-        axes[0][col + 1].set_title(label, color="white", fontsize=11, fontweight="bold", pad=6)
-        _dark_colorbar(fig, im, axes[0][col + 1])
-        im_preds.append(im)
+        ax.set_title(title, color="white", fontsize=11, fontweight="bold", pad=6)
+        _dark_colorbar(fig, im, ax)
+        if title == "Ground Truth":
+            im_truth = im
+        else:
+            im_preds.append(im)
 
-    # Bottom row: error maps (optional).
     im_errors = []
     if show_error:
-        for col, label in enumerate(labels):
-            im = axes[1][col + 1].imshow(
-                np.zeros_like(frames[0][col].prediction_fields[ch]),
-                cmap="RdBu_r", vmin=-err_abs_max, vmax=err_abs_max,
-                origin="upper", aspect="auto",
+        err_axes = _init_animation_panel_axes(
+            axes[pred_rows:pred_rows + err_rows, :err_cols],
+            err_rows,
+            err_cols,
+            n_opts,
+        )
+        for ax in axes[pred_rows:pred_rows + err_rows, err_cols:fig_cols].ravel():
+            ax.set_visible(False)
+        for ax, label in zip(err_axes, labels):
+            im = ax.imshow(
+                np.zeros_like(frames[0][0].prediction_fields[ch]),
+                cmap="RdBu_r",
+                vmin=-err_abs_max,
+                vmax=err_abs_max,
+                origin="upper",
+                aspect="auto",
             )
-            axes[1][col + 1].set_title(
-                f"{label} error", color="white", fontsize=10, fontweight="bold", pad=6
-            )
-            _dark_colorbar(fig, im, axes[1][col + 1])
+            ax.set_title(f"{label} error", color="white", fontsize=10, fontweight="bold", pad=6)
+            _dark_colorbar(fig, im, ax)
             im_errors.append(im)
-        # Hide the unused bottom-left cell (under the truth panel).
-        axes[1][0].set_visible(False)
 
     # Use a figure-level title rather than per-axes text so the shared title is
     # retained by Pillow/FFMpeg writers across every rendered animation frame.
@@ -885,9 +936,13 @@ def make_spectral_image_animation(
 
     first_step, first_panels = frames[0]
     n_panels = len(first_panels)
-    n_cols = min(3, n_panels)
-    n_rows = int(math.ceil(n_panels / n_cols))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5.0 * n_cols, 4.2 * n_rows + 0.7), squeeze=False)
+    n_rows, n_cols = _compact_grid_shape(n_panels)
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(ANIMATION_PANEL_W * n_cols, ANIMATION_PANEL_H * n_rows + 0.7),
+        squeeze=False,
+    )
     fig.patch.set_facecolor("#111827")
 
     images = []

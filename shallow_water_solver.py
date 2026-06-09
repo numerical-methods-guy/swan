@@ -405,6 +405,7 @@ class ShallowWaterSolver(nn.Module):
         """
         plotting routine for data on the grid. Requires cartopy for 3d plots.
         """
+        from visualize import mpl_style  # noqa: F401  # apply M2PI report typography
         import matplotlib.pyplot as plt
 
         lons = self.lons.squeeze() - torch.pi

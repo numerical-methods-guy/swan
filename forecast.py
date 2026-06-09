@@ -4,6 +4,7 @@ import argparse
 import yaml
 import numpy as np
 import pandas as pd
+from visualize import mpl_style  # noqa: F401  # apply M2PI report typography
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
