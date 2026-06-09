@@ -13,6 +13,18 @@ from training.lightning_module import SWELightningModule
 from training.logging import build_loggers
 
 
+def optimizer_run_name(config: dict, optimizer_name: str, suffix: str = "") -> str:
+    """Build a concise logger name for an optimizer run.
+
+    When train_all_optimizers.sh sets experiment.name to the optimizer itself,
+    appending the optimizer again would produce folders such as adam_adam.  For
+    shared experiment names, keep the optimizer suffix so runs remain distinct.
+    """
+    experiment_name = str(config["experiment"]["name"])
+    base_name = experiment_name if experiment_name.lower() == optimizer_name.lower() else f"{experiment_name}_{optimizer_name}"
+    return f"{base_name}{suffix}"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -85,7 +97,7 @@ def main():
 
         logger = build_loggers(
             config,
-            run_name=f"{config['experiment']['name']}_{optimizer_name}",
+            run_name=optimizer_run_name(config, optimizer_name),
         )
         checkpoint_callback = ModelCheckpoint(
             monitor="val_loss",
@@ -138,7 +150,7 @@ def main():
 
         finetune_logger = build_loggers(
             config,
-            run_name=f"{config['experiment']['name']}_{optimizer_name}_finetune",
+            run_name=optimizer_run_name(config, optimizer_name, "_finetune"),
         )
         finetune_checkpoint = ModelCheckpoint(
             monitor="val_loss",

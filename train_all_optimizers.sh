@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+pretrain_epochs=50
+
 optimizers=(
   adam
   adamw
@@ -28,5 +30,6 @@ for opt in "${optimizers[@]}"; do
   python train.py \
     --config config_paradis.yaml \
     --optimizer "${opt}" \
-    --experiment.name "${opt}"
+    --experiment.name "${opt}" \
+    --training.pretrain_epochs "${pretrain_epochs}"
 done

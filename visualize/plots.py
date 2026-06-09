@@ -55,15 +55,44 @@ def resource_axis_name(resource: str) -> str:
 
 
 def history_line_style(index: int) -> Dict[str, object]:
-    """Return a clean solid-line style for crowded optimizer history plots."""
-    colors = plt.get_cmap("tab20").colors
+    """Return a distinguishable line style for crowded optimizer history plots."""
+    colors = plt.get_cmap("tab10").colors
+    linestyles = ("-", "--", "-.", ":")
+    markers = ("o", "s", "^", "D", "v", "P", "X", "*")
+    color = colors[index % len(colors)]
     return {
-        "color": colors[index % len(colors)],
-        "linestyle": "-",
-        "linewidth": 2.2 + 0.15 * (index % 3),
-        "alpha": 0.72,
+        "color": color,
+        "linestyle": linestyles[index % len(linestyles)],
+        "linewidth": 2.0,
+        "alpha": 0.9,
+        "marker": markers[index % len(markers)],
+        "markersize": 3.2,
+        "markerfacecolor": "white",
+        "markeredgecolor": color,
+        "markeredgewidth": 0.9,
         "zorder": 10 + index,
     }
+
+
+def history_marker_positions(values: Sequence[float]) -> List[int]:
+    """Choose sparse marker positions while always including visible endpoints."""
+    n_points = len(values)
+    if n_points <= 0:
+        return []
+    if n_points <= 12:
+        return [i for i, value in enumerate(values) if np.isfinite(value)]
+
+    finite_indices = [i for i, value in enumerate(values) if np.isfinite(value)]
+    if not finite_indices:
+        return []
+
+    stride = max(1, n_points // 10)
+    positions = list(range(0, n_points, stride))
+    positions = [i for i in positions if i in finite_indices]
+    for endpoint in (finite_indices[0], finite_indices[-1]):
+        if endpoint not in positions:
+            positions.append(endpoint)
+    return sorted(positions)
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +105,7 @@ def plot_history_learning_curve(
     error_metric: str,
     resource: str,
     outdir: Path,
+    yscale: str = "linear",
 ) -> None:
     """Plot metric value against training step or relative wall-clock time."""
     series_by_label = hist.prepare_learning_curve_data(runs, stage, error_metric)
@@ -85,14 +115,22 @@ def plot_history_learning_curve(
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
     for i, (label, series) in enumerate(series_by_label.items()):
         x = series.step if resource == "step" else series.relative_time_sec
-        ax.plot(x, series.value, label=label, **history_line_style(i))
+        style = history_line_style(i)
+        if stage == "training":
+            style.pop("marker", None)
+            style.pop("markersize", None)
+            style.pop("markerfacecolor", None)
+            style.pop("markeredgecolor", None)
+            style.pop("markeredgewidth", None)
+        ax.plot(x, series.value, label=label, **style)
 
     ax.set_xlabel(resource_axis_name(resource))
     ax.set_ylabel(y_label)
     ax.set_title(f"{y_label} vs {resource_axis_name(resource)}")
-    ax.grid(True, alpha=0.3)
-    ax.legend(frameon=True, framealpha=0.92)
-    fig.tight_layout()
+    ax.set_yscale(yscale)
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True, framealpha=0.92)
+    fig.tight_layout(rect=(0, 0, 0.82, 1))
 
     output = outdir / f"learning_curve_{stage}_{resource}_{metric_name}.png"
     save_figure(fig, output)
@@ -104,6 +142,7 @@ def plot_history_hitting_curve(
     error_metric: str,
     resource: str,
     outdir: Path,
+    threshold_xscale: str = "linear",
 ) -> None:
     """Plot first-hitting resource as a function of target error threshold."""
     curves = hist.prepare_hitting_curve_data(runs, stage, error_metric, resource)
@@ -114,13 +153,15 @@ def plot_history_hitting_curve(
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
     for i, (label, (thresholds, hits)) in enumerate(curves.items()):
         style = history_line_style(i)
+        style["markevery"] = history_marker_positions(hits)
         ax.plot(thresholds, hits, label=label, **style)
 
     ax.set_xlabel(f"target {metric_label} threshold")
     ax.set_ylabel(y_label)
     ax.set_title(f"First hitting {resource} vs target {metric_label}")
-    ax.grid(True, alpha=0.3)
-    ax.legend(frameon=True, framealpha=0.92)
+    ax.set_xscale(threshold_xscale)
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True, framealpha=0.92)
     # Thresholds are generated from loose to strict.  Inverting the x-axis makes
     # the plot read naturally: moving right asks for a stricter/lower error.
     ax.invert_xaxis()
@@ -250,7 +291,7 @@ def plot_forecast_runtime_ratio_bar(rollout_runs: Sequence[roll.RolloutRun], out
                 )
         ax.set_ylim(top=max(ax.get_ylim()[1], ymax + 5 * pad))
     ax.legend(frameon=False)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 0.82, 1))
     save_figure(fig, outdir / "forecast_runtime_ratio_bar.png")
 
 

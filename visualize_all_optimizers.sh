@@ -2,6 +2,8 @@
 set -euo pipefail
 
 channel="vorticity"
+include_sgd=true
+history_scale="log"
 
 optimizers=(
   adam
@@ -9,7 +11,6 @@ optimizers=(
 #  gauss_newton
   mud
   muon
-  sgd
 )
 
 labels=(
@@ -18,8 +19,12 @@ labels=(
 #  Gauss-Newton
   MUD
   Muon
-  SGD
 )
+
+if [[ "${include_sgd}" == "true" ]]; then
+  optimizers+=(sgd)
+  labels+=(SGD)
+fi
 
 if [[ "${#optimizers[@]}" -ne "${#labels[@]}" ]]; then
   echo "Error: optimizers and labels must have the same length." >&2
@@ -31,9 +36,14 @@ for opt in "${optimizers[@]}"; do
   runs+=("./logs/${opt}/version_0")
 done
 
-figures_history_dir="./figures_history"
-figures_forecast_dir="./figures_forecast"
-rollout_dir="./rollout_results"
+output_suffix=""
+if [[ "${include_sgd}" != "true" ]]; then
+  output_suffix="_no_sgd"
+fi
+
+figures_history_dir="./figures_history${output_suffix}"
+figures_forecast_dir="./figures_forecast${output_suffix}"
+rollout_dir="./rollout_results${output_suffix}"
 
 read -r -p "Clear ${figures_history_dir}, ${figures_forecast_dir}, and ${rollout_dir} before plotting? [y/N] " clear_outputs
 case "${clear_outputs}" in
@@ -54,6 +64,7 @@ python -m visualize plot_history \
   --plot both \
   --error_metric l2 \
   --efficiency_metric both \
+  --history_scale "${history_scale}" \
   --outdir "${figures_history_dir}"
 
 echo "=== Plotting forecast comparison ==="
@@ -74,5 +85,6 @@ python -m visualize animate \
   --rollout_dir "${rollout_dir}" \
   --labels "${labels[@]}" \
   --channel "${channel}" \
+  --show_error \
   --output "${figures_forecast_dir}/rollout_fields.gif" \
   --spectral_output "${figures_forecast_dir}/rollout_spectra.gif"

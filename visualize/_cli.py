@@ -98,6 +98,7 @@ def run_plot_history(args: argparse.Namespace) -> None:
                     error_metric=metric,
                     resource=resource,
                     outdir=outdir,
+                    yscale=args.history_scale,
                 )
 
         if args.plot in ("hitting_curve", "both"):
@@ -108,6 +109,7 @@ def run_plot_history(args: argparse.Namespace) -> None:
                     error_metric=metric,
                     resource=resource,
                     outdir=outdir,
+                    threshold_xscale=args.history_scale,
                 )
 
 
@@ -263,6 +265,13 @@ def build_parser() -> argparse.ArgumentParser:
     ph.add_argument("--plot", choices=hist.HISTORY_PLOTS, default="learning_curve", help="History plot type. Default: learning_curve")
     ph.add_argument("--error_metric", choices=hist.ERROR_METRICS, default="loss", help="Error/loss metric. Default: loss")
     ph.add_argument("--efficiency_metric", choices=hist.EFFICIENCY_METRICS, default="both", help="X-axis resource. Default: both")
+    ph.add_argument(
+        "--history_scale",
+        "--yscale",
+        choices=("linear", "log"),
+        default="linear",
+        help="Scale for history plots: learning-curve y-axis and hitting-curve threshold x-axis. Default: linear",
+    )
     ph.add_argument("--outdir", default="./figures", help="Directory for history figures. Default: ./figures")
     ph.set_defaults(func=run_plot_history)
 

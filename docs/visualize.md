@@ -290,6 +290,7 @@ figures_history/
 | `--plot` | no | `learning_curve` | `learning_curve`, `hitting_curve`, `both` | Which history plot type to generate. |
 | `--error_metric` | no | `loss` | `loss`, `l1`, `l2`, `sq_l2`, `w11` | Error/loss metric. |
 | `--efficiency_metric` | no | `both` | `step`, `time`, `both` | X-axis resource for history plots. |
+| `--history_scale` | no | `linear` | `linear`, `log` | Scale for history plots. For learning curves, this controls the metric y-axis; for hitting curves, this controls the target-threshold x-axis. |
 | `--outdir` | no | `./figures` | path | Folder where history figures are saved. |
 
 ---
@@ -339,6 +340,14 @@ x-axis = training step or relative wall-clock time
 y-axis = selected training/validation metric
 one curve per optimizer
 ```
+
+The legend is placed outside the plot area so it does not cover overlapping
+curves. Validation learning curves show markers at each logged validation point;
+training curves use lines without markers to avoid clutter when many training
+points are logged. Use `--history_scale log` when relative loss/error
+differences are more important than absolute differences. For learning curves,
+this makes the metric y-axis logarithmic; for hitting curves, this makes the
+target-threshold x-axis logarithmic while keeping first-hit step/time linear.
 
 Example:
 
@@ -852,7 +861,7 @@ python -m visualize animate \
 | `--channel` | no | `vorticity` | `h`, `vorticity`, `divergence` | Field channel to animate. |
 | `--output` | no | `./figures_forecast/rollout_fields.gif` | path | Output file for field animation (.gif or .mp4). |
 | `--spectral_output` | no | derived from `--output` | path | Output file for spectral-analysis animation (.gif or .mp4). |
-| `--split_spectral` / `--split-spectral` | no | off | flag | Show each optimizer's saved spectral-analysis image separately. By default, all optimizers are combined in one spherical-harmonic graph. |
+| `--split_spectral` | no | off | flag | Show each optimizer's saved spectral-analysis image separately. By default, all optimizers are combined in one spherical-harmonic graph. |
 | `--fps` | no | `8` | integer | Frames per second. |
 | `--show_error` | no | off | flag | Add a second row of signed error maps (prediction − truth). |
 | `--synthetic_demo` | no | off | flag | Generate synthetic rollout data before animating. For tests only. |
