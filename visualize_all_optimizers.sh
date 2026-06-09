@@ -12,6 +12,7 @@ optimizers=(
 #  gauss_newton
   mud
   muon
+  sgd
 )
 
 labels=(
@@ -20,11 +21,12 @@ labels=(
 #  Gauss-Newton
   MUD
   Muon
+  SGD
 )
 
-if [[ "${include_sgd}" == "true" ]]; then
-  optimizers+=(sgd)
-  labels+=(SGD)
+if [[ "${include_sgd}" != "true" ]]; then
+  optimizers=("${optimizers[@]/sgd}")
+  labels=("${labels[@]/SGD}")
 fi
 
 if [[ "${#optimizers[@]}" -ne "${#labels[@]}" ]]; then
