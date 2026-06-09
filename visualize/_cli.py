@@ -76,8 +76,10 @@ from visualize.plots import (
     plot_prediction_grid,
     plot_error_grid,
     plot_combined_spectra,
+    plot_combined_spectra_percent_difference,
     make_rollout_animation,
     make_combined_spectral_animation,
+    make_combined_spectral_percent_difference_animation,
     make_spectral_image_animation,
 )
 
@@ -198,6 +200,13 @@ def run_forecast(args: argparse.Namespace) -> None:
     elif spectra_method == "spherical":
         spectra_method = "fft"
     plot_combined_spectra(snapshots, args.output_freq, outdir, spectra_method=spectra_method, sht=sht)
+    plot_combined_spectra_percent_difference(
+        snapshots,
+        args.output_freq,
+        outdir,
+        spectra_method=spectra_method,
+        sht=sht,
+    )
 
 
 def run_animate(args: argparse.Namespace) -> None:
@@ -253,6 +262,12 @@ def run_animate(args: argparse.Namespace) -> None:
             output=spectral_output,
             config_path="config_paradis.yaml",
         )
+        make_combined_spectral_percent_difference_animation(
+            frames=frames,
+            fps=args.fps,
+            output=_default_spectral_percent_output(spectral_output),
+            config_path="config_paradis.yaml",
+        )
 
 
 def _default_spectral_output(output: str | Path) -> Path:
@@ -265,6 +280,13 @@ def _default_spectral_output(output: str | Path) -> Path:
     else:
         stem = f"{stem}_spectra"
     return output.with_name(f"{stem}{suffix}")
+
+
+def _default_spectral_percent_output(output: str | Path) -> Path:
+    """Return a sibling path for the signed-percent spectral animation."""
+    output = Path(output)
+    suffix = output.suffix or ".gif"
+    return output.with_name(f"{output.stem}_percent_difference{suffix}")
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -472,20 +472,12 @@ def _scaled_power_law(k: np.ndarray, spectrum: np.ndarray, exponent: float) -> n
     return scale * (k ** exponent)
 
 
-def plot_combined_spectra(
+def _comparison_spectra(
     snapshots: Sequence[roll.FieldSnapshot],
-    output_freq: int,
-    outdir: Path,
-    spectra_method: str = "fft",
+    spectra_method: str,
     sht=None,
-) -> None:
-    """Plot one 2x2 spectral figure containing truth and all optimizers.
-
-    The layout intentionally mirrors the original SWAN forecast.py spectral
-    figure: rotational kinetic energy, divergent kinetic energy, potential
-    energy, and total energy.  The comparison version differs in that every
-    optimizer is plotted on the same axes together with the same ground truth.
-    """
+) -> Tuple[Dict[str, np.ndarray], List[Tuple[str, Dict[str, np.ndarray]]]]:
+    """Compute one truth spectrum and one prediction spectrum per optimizer."""
     if spectra_method == "spherical":
         # Spherical combined spectra are only meaningful when every optimizer
         # was rolled out against the same truth trajectory.  Comparing against
@@ -516,6 +508,54 @@ def plot_combined_spectra(
         ]
     else:
         raise ValueError("spectra_method must be 'spherical' or 'fft'")
+    return truth_spectra, pred_spectra
+
+
+def _signed_percent_difference(prediction: np.ndarray, truth: np.ndarray) -> np.ndarray:
+    """Return signed pointwise percent difference from a truth spectrum."""
+    truth = np.asarray(truth, dtype=float)
+    prediction = np.asarray(prediction, dtype=float)
+    finite_truth = np.abs(truth[np.isfinite(truth)])
+    # A tiny spectrum value makes raw percent error numerically explosive even
+    # when the absolute spectral mismatch is unimportant.  Use a small floor
+    # relative to the panel's truth-spectrum magnitude to keep the plot focused
+    # on physically meaningful discrepancies.
+    eps = max(float(np.nanmax(finite_truth)) * 1e-6, 1e-30) if finite_truth.size else 1e-30
+    denom = np.maximum(np.abs(truth), eps)
+    return 100.0 * (prediction - truth) / denom
+
+
+def _spectral_percent_axis_limit(values: Sequence[np.ndarray]) -> float:
+    """Choose a robust symmetric limit for signed spectral percent plots."""
+    arrays = [
+        np.abs(np.asarray(value, dtype=float).ravel())
+        for value in values
+        if np.asarray(value).size
+    ]
+    if not arrays:
+        return 100.0
+    finite = np.concatenate(arrays)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return 100.0
+    return max(25.0, float(np.nanpercentile(finite, 98)) * 1.15)
+
+
+def plot_combined_spectra(
+    snapshots: Sequence[roll.FieldSnapshot],
+    output_freq: int,
+    outdir: Path,
+    spectra_method: str = "fft",
+    sht=None,
+) -> None:
+    """Plot one 2x2 spectral figure containing truth and all optimizers.
+
+    The layout intentionally mirrors the original SWAN forecast.py spectral
+    figure: rotational kinetic energy, divergent kinetic energy, potential
+    energy, and total energy.  The comparison version differs in that every
+    optimizer is plotted on the same axes together with the same ground truth.
+    """
+    truth_spectra, pred_spectra = _comparison_spectra(snapshots, spectra_method, sht)
 
     titles = [
         "Rotational Kinetic Energy",
@@ -595,6 +635,74 @@ def plot_combined_spectra(
     fig.legend(legend_handles, legend_labels, loc="lower center", ncol=min(4, len(legend_labels)), frameon=False)
     fig.tight_layout(rect=(0, 0.08, 1, 0.96))
     save_figure(fig, outdir / "forecast_spectra_final.png")
+
+
+def plot_combined_spectra_percent_difference(
+    snapshots: Sequence[roll.FieldSnapshot],
+    output_freq: int,
+    outdir: Path,
+    spectra_method: str = "fft",
+    sht=None,
+) -> None:
+    """Plot signed spectral percent difference from ground truth in a 2x2 grid."""
+    truth_spectra, pred_spectra = _comparison_spectra(snapshots, spectra_method, sht)
+
+    titles = [
+        "Rotational Kinetic Energy",
+        "Divergent Kinetic Energy",
+        "Potential Energy",
+        "Total Energy",
+    ]
+    keys = ["rotational", "divergent", "potential", "total"]
+    linestyles = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2))]
+    colors = _bar_colors(max(1, len(pred_spectra)))
+
+    fig, axes = plt.subplots(2, 2, figsize=(13.0, 9.6))
+    legend_handles = []
+    legend_labels = []
+
+    for ax, title, key in zip(axes.ravel(), titles, keys):
+        k = np.asarray(truth_spectra["wavenumbers"])[1:]
+        truth_values = np.asarray(truth_spectra[key])[1:]
+        percent_values = []
+        for i, (label, spectra) in enumerate(pred_spectra):
+            k_pred = np.asarray(spectra["wavenumbers"])[1:]
+            diff = _signed_percent_difference(np.asarray(spectra[key])[1:], truth_values)
+            percent_values.append(diff)
+            line, = ax.semilogx(
+                k_pred,
+                diff,
+                color=colors[i % len(colors)],
+                linestyle=linestyles[i % len(linestyles)],
+                linewidth=1.9,
+                marker="o" if len(k_pred) < 40 else None,
+                markersize=3,
+                alpha=0.92,
+                label=label,
+            )
+            if ax is axes.ravel()[0]:
+                legend_handles.append(line)
+                legend_labels.append(label)
+
+        ax.axhline(0.0, color="0.25", linewidth=1.1, alpha=0.75)
+        ax.set_title(title, fontweight="bold")
+        ax.set_xlabel("Wavenumber $l$")
+        ax.set_ylabel("Signed difference from ground truth (%)")
+        y_limit = _spectral_percent_axis_limit(percent_values)
+        ax.set_yscale("symlog", linthresh=10.0)
+        ax.set_ylim(-y_limit, y_limit)
+        ax.grid(True, which="both", alpha=0.3)
+        if len(k) > 0:
+            ax.set_xlim(left=max(1, k[0]), right=k[-1])
+
+    fig.suptitle(
+        f"Final Rollout Spectral Percentage Difference (Step {snapshots[0].step}; Saved Every {output_freq} Step(s))",
+        fontsize=14,
+        fontweight="bold",
+    )
+    fig.legend(legend_handles, legend_labels, loc="lower center", ncol=min(4, len(legend_labels)), frameon=False)
+    fig.tight_layout(rect=(0, 0.08, 1, 0.96))
+    save_figure(fig, outdir / "forecast_spectra_percent_difference_final.png")
 
 
 # ---------------------------------------------------------------------------
@@ -895,6 +1003,95 @@ def make_combined_spectral_animation(
             for label, line in pred_lines:
                 spectra = pred_by_label[label]
                 line.set_data(np.asarray(spectra["wavenumbers"])[1:], np.asarray(spectra[key])[1:])
+                artists.append(line)
+            if len(k) > 0:
+                ax.set_xlim(left=max(1, k[0]), right=k[-1])
+        return artists
+
+    ani = manimation.FuncAnimation(
+        fig,
+        update,
+        frames=len(spectral_frames),
+        interval=1000 / fps,
+        blit=False,
+    )
+    _save_or_show_animation(fig, ani, output, fps=fps, dpi=120)
+
+
+def make_combined_spectral_percent_difference_animation(
+    frames: Sequence[Sequence[roll.FieldSnapshot]],
+    fps: int = 8,
+    output: Optional[Union[str, Path]] = None,
+    config_path: Union[str, Path] = "config_paradis.yaml",
+) -> None:
+    """Animate signed spectral percent difference from ground truth."""
+    if not frames:
+        raise ValueError("frames is empty - nothing to animate.")
+
+    # This companion intentionally uses the same SHT-backed spectra as the
+    # combined spectral animation, but it removes the truth and reference-slope
+    # curves so optimizer error is the only quantity being compared.
+    sht = roll.build_spherical_sht(config_path, frames[0][0].truth_fields.shape)
+    spectral_frames = []
+    percent_values = []
+    for step_snaps in frames:
+        truth_spectra = roll.compute_spherical_energy_spectra(step_snaps[0].truth_fields, sht)
+        pred_spectra = [
+            (snap.label, roll.compute_spherical_energy_spectra(snap.prediction_fields, sht))
+            for snap in step_snaps
+        ]
+        spectral_frames.append((step_snaps[0].step, truth_spectra, pred_spectra))
+        for _, spectra in pred_spectra:
+            for key in ("rotational", "divergent", "potential", "total"):
+                percent_values.append(
+                    _signed_percent_difference(np.asarray(spectra[key])[1:], np.asarray(truth_spectra[key])[1:])
+                )
+
+    spec_keys = [
+        ("rotational", "Rotational"),
+        ("divergent", "Divergent"),
+        ("potential", "Potential"),
+        ("total", "Total"),
+    ]
+    labels = [snap.label for snap in frames[0]]
+    colors = _bar_colors(max(1, len(labels)))
+    y_limit = _spectral_percent_axis_limit(percent_values)
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle("Combined Rollout Spectral Percentage Difference", fontsize=15, fontweight="bold")
+    step_label = fig.text(0.5, 0.935, "", ha="center", va="top", fontsize=11, fontweight="bold")
+
+    line_sets = []
+    for ax, (key, title) in zip(axes.ravel(), spec_keys):
+        pred_lines = []
+        for i, label in enumerate(labels):
+            line, = ax.semilogx([], [], color=colors[i % len(colors)], linewidth=1.8, label=label)
+            pred_lines.append((label, line))
+        ax.axhline(0.0, color="0.25", linewidth=1.1, alpha=0.75)
+        ax.set_title(title, fontweight="bold")
+        ax.set_xlabel("Wavenumber $l$")
+        ax.set_ylabel("Signed difference from ground truth (%)")
+        ax.set_yscale("symlog", linthresh=10.0)
+        ax.set_ylim(-y_limit, y_limit)
+        ax.grid(True, which="both", alpha=0.3)
+        line_sets.append((key, pred_lines))
+
+    handles, legend_labels = axes.ravel()[0].get_legend_handles_labels()
+    fig.legend(handles, legend_labels, loc="lower center", ncol=min(4, len(legend_labels)), frameon=False)
+    fig.tight_layout(rect=(0, 0.08, 1, 0.91))
+
+    def update(frame_index: int):
+        step, truth_spectra, pred_spectra = spectral_frames[frame_index]
+        pred_by_label = dict(pred_spectra)
+        artists = [step_label]
+        step_label.set_text(f"Rollout Step {step}")
+        for ax, (key, pred_lines) in zip(axes.ravel(), line_sets):
+            k = np.asarray(truth_spectra["wavenumbers"])[1:]
+            truth_values = np.asarray(truth_spectra[key])[1:]
+            for label, line in pred_lines:
+                spectra = pred_by_label[label]
+                diff = _signed_percent_difference(np.asarray(spectra[key])[1:], truth_values)
+                line.set_data(np.asarray(spectra["wavenumbers"])[1:], diff)
                 artists.append(line)
             if len(k) > 0:
                 ax.set_xlim(left=max(1, k[0]), right=k[-1])

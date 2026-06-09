@@ -468,6 +468,7 @@ figures_forecast/
   forecast_prediction_grid_vorticity_final.png
   forecast_error_grid_vorticity_final_signed.png
   forecast_spectra_final.png
+  forecast_spectra_percent_difference_final.png
 ```
 
 ---
@@ -724,9 +725,10 @@ All pointwise error panels use one shared automatic color scale. Signed errors u
 
 ```text
 forecast_spectra_final.png
+forecast_spectra_percent_difference_final.png
 ```
 
-Contains one 2-by-2 spectral figure:
+The first file contains one 2-by-2 spectral figure:
 
 ```text
 rotational kinetic energy | divergent kinetic energy
@@ -734,6 +736,10 @@ potential energy          | total energy
 ```
 
 Each subplot includes ground truth and all optimizers, with one shared legend.
+
+The percent-difference companion uses the same 2-by-2 layout, but plots signed
+percentage difference from ground truth for each optimizer. It does not draw
+the ground-truth spectrum or the reference slope curves.
 
 By default this figure uses spherical-harmonic spectra for real rollouts. Pass `--spherical_method fft` to generate the same combined plot with the grid FFT fallback instead.
 
@@ -841,11 +847,13 @@ With the default output paths, the two GIFs are:
 ```text
 figures_forecast/rollout_fields.gif
 figures_forecast/rollout_spectra.gif
+figures_forecast/rollout_spectra_percent_difference.gif
 ```
 
 By default, the spectral animation overlays all optimizers in one animated
-spherical-harmonic spectral comparison graph. Use `--split_spectral` to instead
-show each optimizer's saved spectral-analysis image separately.
+spherical-harmonic spectral comparison graph. It also writes a signed percentage
+difference companion GIF using the same 2-by-2 layout. Use `--split_spectral`
+to instead show each optimizer's saved spectral-analysis image separately.
 
 ---
 
