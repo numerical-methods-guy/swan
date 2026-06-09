@@ -5,6 +5,7 @@ from typing import Union, Type, Tuple
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from model.padding import GeoCyclicPadding
 
@@ -97,6 +98,35 @@ class SepConv(nn.Module):
         x = self.pointwise(x)
         return x
 
+class LocalSepConv(nn.Module):
+    """Separable convolution with local replicate padding for LAM."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        mesh_size: tuple,
+        kernel_size: int = 3,
+        bias: bool = True,
+    ):
+        super().__init__()
+        self.padding = (kernel_size - 1) // 2
+
+        self.depthwise = nn.Conv2d(
+            input_dim, input_dim, kernel_size, groups=input_dim, bias=False
+        )
+        self.pointwise = nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.padding > 0:
+            x = F.pad(
+                x,
+                (self.padding, self.padding, self.padding, self.padding),
+                mode="replicate",
+            )
+        x = self.depthwise(x)
+        x = self.pointwise(x)
+        return x
 
 class ChannelNorm(nn.Module):
     """Channel normalization layer."""
@@ -201,6 +231,7 @@ ActivationType = Type[nn.Module]
 
 BLOCK_REGISTRY = {
     "SepConv": SepConv,
+    "LocalSepConv": LocalSepConv,
     "CLinear": CLinear,
     "ChannelNorm": ChannelNorm,
     "GlobalBias": GlobalBias,
