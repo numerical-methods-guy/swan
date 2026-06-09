@@ -487,6 +487,7 @@ figures_forecast/
 | `--seed` | no | `42` | integer | Forecast-time random seed. |
 | `--channel` | no | `vorticity` | `h`, `vorticity`, `divergence` | Field channel for spatial plots. |
 | `--error_metric` | no | `l2` | `loss`, `l1`, `l2`, `w11` | Scalar forecast metric for curves/bars (aggregated). |
+| `--forecast_error_scale` | no | `linear` | `linear`, `log` | Y-axis scale for `forecast_error_curve_<metric>.png`. |
 | `--error_mode` | no | `signed` | `signed`, `abs`, `squared` | Pointwise error map mode. |
 | `--summary_step` | no | `final` | `final`, `latest`, or integer | Rollout step loaded for grid and spectra plots. |
 | `--spherical_method` | no | `spherical` | `spherical`, `fft` | Spectral method for `forecast_spectra_final.png`. |
@@ -638,6 +639,10 @@ The selected metric is controlled by:
 ```bash
 --error_metric l2
 ```
+
+Use `--forecast_error_scale log` when relative error growth matters or when one
+optimizer dominates the linear-scale curve. The default is `linear` for direct
+absolute-error reading.
 
 ### 2. Aggregate Accuracy Bar Chart
 

@@ -4,6 +4,7 @@ set -euo pipefail
 channel="vorticity"
 include_sgd=true
 history_scale="log"
+forecast_error_scale="log"
 
 optimizers=(
   adam
@@ -78,6 +79,7 @@ python -m visualize forecast \
   --output_freq 5 \
   --channel "${channel}" \
   --rollout_dir "${rollout_dir}" \
+  --forecast_error_scale "${forecast_error_scale}" \
   --outdir "${figures_forecast_dir}"
 
 echo "=== Animating forecast comparison ==="

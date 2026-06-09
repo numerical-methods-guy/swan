@@ -163,7 +163,7 @@ def run_forecast(args: argparse.Namespace) -> None:
     )
     snapshots = roll.load_snapshots_for_step(rollout_runs, args.summary_step)
 
-    plot_forecast_error_curve(rollout_runs, args.error_metric, outdir)
+    plot_forecast_error_curve(rollout_runs, args.error_metric, outdir, yscale=args.forecast_error_scale)
     plot_forecast_accuracy_bar(rollout_runs, args.error_metric, outdir)
     plot_forecast_runtime_ratio_bar(rollout_runs, outdir)
     plot_prediction_grid(snapshots, args.channel, args.grid_cols, args.output_freq, outdir)
@@ -291,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--seed", type=int, default=42, help="Forecast-time random seed. Default: 42")
     fc.add_argument("--channel", choices=tuple(roll.CHANNEL_TO_INDEX.keys()), default="vorticity", help="Field channel for spatial plots. Default: vorticity")
     fc.add_argument("--error_metric", choices=tuple(roll.ERROR_METRIC_TO_COLUMN.keys()), default="l2", help="Scalar forecast metric. Default: l2")
+    fc.add_argument("--forecast_error_scale", choices=("linear", "log"), default="linear", help="Y-axis scale for forecast_error_curve_<metric>.png. Default: linear")
     fc.add_argument("--error_mode", choices=("signed", "abs", "squared"), default="signed", help="Pointwise error map mode. Default: signed")
     fc.add_argument("--summary_step", default="final", help="Step for final grid/spectra plots: final/latest or an integer. Default: final")
     fc.add_argument("--spherical_method", choices=("spherical", "fft"), default="spherical", help="Method for forecast_spectra_final.png. Default: spherical")

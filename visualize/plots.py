@@ -175,7 +175,12 @@ def plot_history_hitting_curve(
 # forecast scalar plots
 # ---------------------------------------------------------------------------
 
-def plot_forecast_error_curve(rollout_runs: Sequence[roll.RolloutRun], error_metric: str, outdir: Path) -> None:
+def plot_forecast_error_curve(
+    rollout_runs: Sequence[roll.RolloutRun],
+    error_metric: str,
+    outdir: Path,
+    yscale: str = "linear",
+) -> None:
     """Plot forecast error history versus autoregressive rollout step."""
     column = roll.metric_column(error_metric)
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
@@ -195,6 +200,7 @@ def plot_forecast_error_curve(rollout_runs: Sequence[roll.RolloutRun], error_met
     ax.set_xlabel("autoregressive rollout step")
     ax.set_ylabel(column)
     ax.set_title(f"Forecast {column} over rollout")
+    ax.set_yscale(yscale)
     ax.grid(True, alpha=0.3)
     ax.legend()
     fig.tight_layout()
