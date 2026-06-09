@@ -41,7 +41,7 @@ clear_training_logs=false
 include_gauss_newton=true
 
 # Epoch overrides used only when this wrapper calls train_all_optimizers.sh.
-training_pretrain_epochs=50
+training_pretrain_epochs=25
 training_gauss_newton_epochs=2
 resolution_nlat=128
 resolution_nlon=256
@@ -56,7 +56,7 @@ overwrite_visualization_outputs=false
 visualization_channel="vorticity"
 visualization_history_scale="log"
 visualization_forecast_error_scale="log"
-visualization_autoreg_steps=200
+visualization_autoreg_steps=100
 visualization_output_freq=5
 
 # Versioned visualization outputs. With visualization_version="auto",
