@@ -184,6 +184,8 @@ def run_real_rollouts(
     seed: int,
     channel: str,
     device: Optional[str] = None,
+    nlat: Optional[int] = None,
+    nlon: Optional[int] = None,
 ) -> List[RolloutRun]:
     """Run real SWAN rollouts using original ``forecast.py`` helpers.
 
@@ -254,6 +256,19 @@ def run_real_rollouts(
                 "Using checkpoint config: "
                 f"nlat={dims.get('nlat')}, nlon={dims.get('nlon')}, "
                 f"dt={dims.get('dt')}, dt_solver={dims.get('dt_solver')}"
+            )
+
+        # Resolution overrides are evaluation-time settings.  They update the
+        # data grid used by the forecast dataset and spherical transforms while
+        # leaving checkpoint weights unchanged.
+        if nlat is not None:
+            run_config["data"]["nlat"] = int(nlat)
+        if nlon is not None:
+            run_config["data"]["nlon"] = int(nlon)
+        if nlat is not None or nlon is not None:
+            print(
+                "Using forecast resolution override: "
+                f"nlat={run_config['data']['nlat']}, nlon={run_config['data']['nlon']}"
             )
 
         model_module = forecast.SWELightningModule(run_config)

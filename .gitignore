@@ -12,6 +12,7 @@ rollout_results/
 figures/
 figures_history/
 figures_forecast/
+visualization_runs/
 *.gif
 *.mp4
 mlruns/
@@ -21,6 +22,7 @@ CCDB_README.md
 env_setup.sh
 slurm_*.sh
 slurm_logs/
+cluster_logs/
 optuna_results/
 
 # Distribution / packaging

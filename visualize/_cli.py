@@ -147,6 +147,8 @@ def run_forecast(args: argparse.Namespace) -> None:
             output_freq=args.output_freq,
             num_ics=args.num_ics,
             seed=args.seed,
+            nlat=args.nlat or 32,
+            nlon=args.nlon or 64,
         )
     else:
         if not args.runs:
@@ -166,6 +168,8 @@ def run_forecast(args: argparse.Namespace) -> None:
             seed=args.seed,
             channel=args.channel,
             device=args.device,
+            nlat=args.nlat,
+            nlon=args.nlon,
         )
 
     if not args.reuse_rollouts:
@@ -311,6 +315,8 @@ def build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--summary_step", default="final", help="Step for final grid/spectra plots: final/latest or an integer. Default: final")
     fc.add_argument("--spherical_method", choices=("spherical", "fft"), default="spherical", help="Method for forecast_spectra_final.png. Default: spherical")
     fc.add_argument("--grid_cols", type=int, default=3, help="Maximum columns in spatial grids. Default: 3")
+    fc.add_argument("--nlat", type=int, default=None, help="Optional forecast grid latitude count override. Default: config/checkpoint value")
+    fc.add_argument("--nlon", type=int, default=None, help="Optional forecast grid longitude count override. Default: config/checkpoint value")
     fc.add_argument("--rollout_dir", default="./rollout_results", help="Directory for per-optimizer rollout outputs. Default: ./rollout_results")
     fc.add_argument("--outdir", default="./figures_forecast", help="Directory for final forecast figures. Default: ./figures_forecast")
     fc.add_argument("--device", default=None, help="Optional real-rollout device, e.g. cuda or cpu. Default: auto")

@@ -14,6 +14,8 @@ history_scale="${HISTORY_SCALE:-log}"
 forecast_error_scale="${FORECAST_ERROR_SCALE:-log}"
 autoreg_steps="${AUTOREG_STEPS:-100}"
 output_freq="${OUTPUT_FREQ:-5}"
+nlat="${VIS_NLAT:-128}"
+nlon="${VIS_NLON:-256}"
 
 # Rollout tensors are much larger than the final figures.  Keep this true for
 # cluster runs when the saved .pt rollout files are only an intermediate product
@@ -24,23 +26,25 @@ delete_rollouts_after_plotting=true
 # ---------------------------------------------------------------------------
 # Optimizer groups
 # ---------------------------------------------------------------------------
-# Base comparison: first-order/baseline optimizers only, always including SGD.
-# These are the folders produced by train_all_optimizers.sh when
-# include_gauss_newton=false.
-base_optimizers=(adam adamw mud muon sgd)
-base_labels=(Adam AdamW MUD Muon SGD)
-
-# Optional all-optimizer comparison: the base group plus Gauss-Newton in one
-# graph.  Use this when the Gauss-Newton training budget is intentionally part
-# of the comparison story.
+# Full comparison when Gauss-Newton is enabled.
 all_optimizers=(adam adamw gauss_newton mud muon sgd)
 all_labels=(Adam AdamW Gauss-Newton MUD Muon SGD)
 
-# Optional diagnostic view: Gauss-Newton alone.  This is useful when it was
-# trained for fewer epochs and should not be visually judged as a fair peer of
-# the first-order optimizers.
-gauss_newton_optimizers=(gauss_newton)
-gauss_newton_labels=(Gauss-Newton)
+# Full comparison when Gauss-Newton is disabled.
+all_without_gauss_optimizers=(adam adamw mud muon sgd)
+all_without_gauss_labels=(Adam AdamW MUD Muon SGD)
+
+# Diagnostic comparison for the two unstable/baseline optimizers.
+sgd_gauss_optimizers=(gauss_newton sgd)
+sgd_gauss_labels=(Gauss-Newton SGD)
+
+# Main high-performing comparison, excluding both SGD and Gauss-Newton.
+without_sgd_gauss_optimizers=(adam adamw mud muon)
+without_sgd_gauss_labels=(Adam AdamW MUD Muon)
+
+# Same high-performing comparison when Gauss-Newton is not included.
+without_sgd_optimizers=(adam adamw mud muon)
+without_sgd_labels=(Adam AdamW MUD Muon)
 
 validate_group() {
   local group_name="$1"
@@ -109,6 +113,8 @@ run_forecast_group() {
     --spherical_method spherical \
     --summary_step final \
     --output_freq "${output_freq}" \
+    --nlat "${nlat}" \
+    --nlon "${nlon}" \
     --channel "${channel}" \
     --rollout_dir "${rollout_dir}" \
     --forecast_error_scale "${forecast_error_scale}" \
@@ -138,19 +144,21 @@ run_forecast_group() {
 # and raw rollout outputs.  Each selected comparison scope gets a matching
 # subfolder under every root, which keeps files from different optimizer sets
 # easy to browse without mixing them together.
-history_root="./figures_history"
-forecast_root="./figures_forecast"
-rollout_root="./rollout_results"
+history_root="${FIGURES_HISTORY_ROOT:-./figures_history}"
+forecast_root="${FIGURES_FORECAST_ROOT:-./figures_forecast}"
+rollout_root="${ROLLOUT_ROOT:-./rollout_results}"
 
-base_history_dir="${history_root}/base_optimizers"
-base_forecast_dir="${forecast_root}/base_optimizers"
-base_rollout_dir="${rollout_root}/base_optimizers"
+all_history_dir="${history_root}/all_optimizers"
+all_forecast_dir="${forecast_root}/all_optimizers"
 
-all_history_dir="${history_root}/with_gauss_newton"
-all_forecast_dir="${forecast_root}/with_gauss_newton"
+sgd_gauss_history_dir="${history_root}/sgd_and_gauss_newton"
+sgd_gauss_forecast_dir="${forecast_root}/sgd_and_gauss_newton"
 
-gauss_newton_history_dir="${history_root}/gauss_newton_only"
-gauss_newton_forecast_dir="${forecast_root}/gauss_newton_only"
+without_sgd_gauss_history_dir="${history_root}/without_sgd_gauss_newton"
+without_sgd_gauss_forecast_dir="${forecast_root}/without_sgd_gauss_newton"
+
+without_sgd_history_dir="${history_root}/without_sgd"
+without_sgd_forecast_dir="${forecast_root}/without_sgd"
 
 # When Gauss-Newton is included, every optimizer is rolled out once into this
 # shared folder.  The separate forecast figure folders then reuse the matching
@@ -177,36 +185,46 @@ esac
 # ---------------------------------------------------------------------------
 # Build every selected group before plotting.  Keeping these arrays explicit
 # makes each output folder correspond to exactly one comparison scope.
-validate_group "base" base_optimizers base_labels
-build_runs base_optimizers base_runs
-
 if [[ "${include_gauss_newton}" == "true" ]]; then
-  validate_group "all-with-Gauss-Newton" all_optimizers all_labels
+  validate_group "all optimizers" all_optimizers all_labels
   build_runs all_optimizers all_runs
 
-  validate_group "Gauss-Newton-only" gauss_newton_optimizers gauss_newton_labels
-  build_runs gauss_newton_optimizers gauss_newton_runs
+  validate_group "SGD-and-Gauss-Newton" sgd_gauss_optimizers sgd_gauss_labels
+  build_runs sgd_gauss_optimizers sgd_gauss_runs
+
+  validate_group "without-SGD-and-Gauss-Newton" without_sgd_gauss_optimizers without_sgd_gauss_labels
+  build_runs without_sgd_gauss_optimizers without_sgd_gauss_runs
+else
+  validate_group "all optimizers without Gauss-Newton" all_without_gauss_optimizers all_without_gauss_labels
+  build_runs all_without_gauss_optimizers all_without_gauss_runs
+
+  validate_group "without-SGD" without_sgd_optimizers without_sgd_labels
+  build_runs without_sgd_optimizers without_sgd_runs
 fi
 
 # History plots are cheaper than rollouts and do not depend on forecast output.
 # Run every selected history comparison first so Gauss-Newton folders/messages
 # are produced even if a later checkpoint lookup or rollout job fails.
 echo "=== History plot phase ==="
-run_history_group "base optimizer" "${base_history_dir}" base_runs base_labels
 
 if [[ "${include_gauss_newton}" == "true" ]]; then
-  run_history_group "all optimizers including Gauss-Newton" "${all_history_dir}" all_runs all_labels
-  run_history_group "Gauss-Newton-only" "${gauss_newton_history_dir}" gauss_newton_runs gauss_newton_labels
+  run_history_group "all optimizers including SGD and Gauss-Newton" "${all_history_dir}" all_runs all_labels
+  run_history_group "SGD and Gauss-Newton" "${sgd_gauss_history_dir}" sgd_gauss_runs sgd_gauss_labels
+  run_history_group "optimizers excluding SGD and Gauss-Newton" "${without_sgd_gauss_history_dir}" without_sgd_gauss_runs without_sgd_gauss_labels
+else
+  run_history_group "all optimizers" "${all_history_dir}" all_without_gauss_runs all_without_gauss_labels
+  run_history_group "optimizers excluding SGD" "${without_sgd_history_dir}" without_sgd_runs without_sgd_labels
 fi
 
 echo "=== Forecast and animation phase ==="
 
 if [[ "${include_gauss_newton}" == "true" ]]; then
-  run_forecast_group "all optimizers including Gauss-Newton" "${all_forecast_dir}" "${shared_rollout_dir}" false all_runs all_labels
-  run_forecast_group "base optimizer" "${base_forecast_dir}" "${shared_rollout_dir}" true base_runs base_labels
-  run_forecast_group "Gauss-Newton-only" "${gauss_newton_forecast_dir}" "${shared_rollout_dir}" true gauss_newton_runs gauss_newton_labels
+  run_forecast_group "all optimizers including SGD and Gauss-Newton" "${all_forecast_dir}" "${shared_rollout_dir}" false all_runs all_labels
+  run_forecast_group "SGD and Gauss-Newton" "${sgd_gauss_forecast_dir}" "${shared_rollout_dir}" true sgd_gauss_runs sgd_gauss_labels
+  run_forecast_group "optimizers excluding SGD and Gauss-Newton" "${without_sgd_gauss_forecast_dir}" "${shared_rollout_dir}" true without_sgd_gauss_runs without_sgd_gauss_labels
 else
-  run_forecast_group "base optimizer" "${base_forecast_dir}" "${base_rollout_dir}" false base_runs base_labels
+  run_forecast_group "all optimizers" "${all_forecast_dir}" "${shared_rollout_dir}" false all_without_gauss_runs all_without_gauss_labels
+  run_forecast_group "optimizers excluding SGD" "${without_sgd_forecast_dir}" "${shared_rollout_dir}" true without_sgd_runs without_sgd_labels
 fi
 
 if [[ "${delete_rollouts_after_plotting}" == "true" ]]; then

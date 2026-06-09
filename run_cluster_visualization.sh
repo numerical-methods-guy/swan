@@ -41,20 +41,29 @@ clear_training_logs=false
 include_gauss_newton=true
 
 # Epoch overrides used only when this wrapper calls train_all_optimizers.sh.
-training_pretrain_epochs=25
+training_pretrain_epochs=50
 training_gauss_newton_epochs=2
+resolution_nlat=128
+resolution_nlon=256
 
-# clear_visualization_outputs=true answers "y" to the visualization cleanup
-# prompt and clears ./figures_history, ./figures_forecast, and ./rollout_results.
-clear_visualization_outputs=true
+# overwrite_visualization_outputs=false preserves existing visualization runs by
+# creating the next version_N folder. When true, the wrapper rewrites the latest
+# existing version_N folder, or creates version_0 if no version exists yet.
+overwrite_visualization_outputs=false
 
 # Visualization settings passed to visualize_all_optimizers.sh for this wrapper
 # run. Direct runs of visualize_all_optimizers.sh keep that file's defaults.
 visualization_channel="vorticity"
 visualization_history_scale="log"
 visualization_forecast_error_scale="log"
-visualization_autoreg_steps=100
+visualization_autoreg_steps=200
 visualization_output_freq=5
+
+# Versioned visualization outputs. With visualization_version="auto",
+# overwrite_visualization_outputs controls whether the wrapper creates the next
+# version_N or rewrites the latest existing version_N.
+visualization_root="./visualization_runs"
+visualization_version="auto"
 
 # Optional environment setup. Put module/conda commands here if needed, e.g.:
 #
@@ -74,12 +83,16 @@ print_settings() {
   echo "include_gauss_newton=${include_gauss_newton}"
   echo "training_pretrain_epochs=${training_pretrain_epochs}"
   echo "training_gauss_newton_epochs=${training_gauss_newton_epochs}"
-  echo "clear_visualization_outputs=${clear_visualization_outputs}"
+  echo "resolution_nlat=${resolution_nlat}"
+  echo "resolution_nlon=${resolution_nlon}"
+  echo "overwrite_visualization_outputs=${overwrite_visualization_outputs}"
   echo "visualization_channel=${visualization_channel}"
   echo "visualization_history_scale=${visualization_history_scale}"
   echo "visualization_forecast_error_scale=${visualization_forecast_error_scale}"
   echo "visualization_autoreg_steps=${visualization_autoreg_steps}"
   echo "visualization_output_freq=${visualization_output_freq}"
+  echo "visualization_root=${visualization_root}"
+  echo "visualization_version=${visualization_version}"
 }
 
 validate_bool() {
@@ -104,32 +117,115 @@ run_training_phase() {
   esac
 
   echo "=== Training phase ==="
-  printf '%s\n' "${clear_answer}" | env PRETRAIN_EPOCHS="${training_pretrain_epochs}" GAUSS_NEWTON_EPOCHS="${training_gauss_newton_epochs}" INCLUDE_GAUSS_NEWTON="${include_gauss_newton}" bash train_all_optimizers.sh
+  printf '%s\n' "${clear_answer}" | env PRETRAIN_EPOCHS="${training_pretrain_epochs}" GAUSS_NEWTON_EPOCHS="${training_gauss_newton_epochs}" INCLUDE_GAUSS_NEWTON="${include_gauss_newton}" TRAIN_NLAT="${resolution_nlat}" TRAIN_NLON="${resolution_nlon}" bash train_all_optimizers.sh
 }
 
 run_visualization_phase() {
   local clear_answer="n"
+  local version_dir
 
-  case "${clear_visualization_outputs}" in
+  case "${overwrite_visualization_outputs}" in
     true)
       clear_answer="y"
-      echo "Visualization outputs will be cleared before plotting."
+      echo "Latest/selected visualization version will be overwritten."
       ;;
     false)
       clear_answer="n"
-      echo "Visualization outputs will be kept; new plots may overwrite files with the same names."
+      echo "Existing visualization versions will be preserved; a new version will be created when using auto."
       ;;
   esac
 
+  version_dir="$(prepare_visualization_version)"
+  write_visualization_settings "${version_dir}"
+
   echo "=== Visualization phase ==="
-  printf '%s\n' "${clear_answer}" | env INCLUDE_GAUSS_NEWTON="${include_gauss_newton}" VIS_CHANNEL="${visualization_channel}" HISTORY_SCALE="${visualization_history_scale}" FORECAST_ERROR_SCALE="${visualization_forecast_error_scale}" AUTOREG_STEPS="${visualization_autoreg_steps}" OUTPUT_FREQ="${visualization_output_freq}" bash visualize_all_optimizers.sh
+  echo "Visualization version directory: ${version_dir}"
+  printf '%s\n' "${clear_answer}" | env INCLUDE_GAUSS_NEWTON="${include_gauss_newton}" VIS_CHANNEL="${visualization_channel}" HISTORY_SCALE="${visualization_history_scale}" FORECAST_ERROR_SCALE="${visualization_forecast_error_scale}" AUTOREG_STEPS="${visualization_autoreg_steps}" OUTPUT_FREQ="${visualization_output_freq}" VIS_NLAT="${resolution_nlat}" VIS_NLON="${resolution_nlon}" FIGURES_HISTORY_ROOT="${version_dir}/figures_history" FIGURES_FORECAST_ROOT="${version_dir}/figures_forecast" ROLLOUT_ROOT="${version_dir}/rollout_results" bash visualize_all_optimizers.sh
+}
+
+prepare_visualization_version() {
+  local root="${visualization_root}"
+  local version="${visualization_version}"
+  local candidate
+  local latest=""
+  local idx=0
+
+  mkdir -p "${root}"
+
+  case "${version}" in
+    auto)
+      if [[ "${overwrite_visualization_outputs}" == "true" ]]; then
+        while true; do
+          candidate="${root}/version_${idx}"
+          if [[ -e "${candidate}" ]]; then
+            latest="${candidate}"
+            idx=$((idx + 1))
+          else
+            break
+          fi
+        done
+        if [[ -n "${latest}" ]]; then
+          printf '%s\n' "${latest}"
+        else
+          candidate="${root}/version_0"
+          mkdir -p "${candidate}"
+          printf '%s\n' "${candidate}"
+        fi
+        return 0
+      fi
+      while true; do
+        candidate="${root}/version_${idx}"
+        if [[ -e "${candidate}" ]]; then
+          idx=$((idx + 1))
+        else
+          mkdir -p "${candidate}"
+          printf '%s\n' "${candidate}"
+          return 0
+        fi
+      done
+      ;;
+    version_*)
+      candidate="${root}/${version}"
+      mkdir -p "${candidate}"
+      printf '%s\n' "${candidate}"
+      ;;
+    *)
+      candidate="${root}/${version}"
+      mkdir -p "${candidate}"
+      printf '%s\n' "${candidate}"
+      ;;
+  esac
+}
+
+write_visualization_settings() {
+  local version_dir="$1"
+
+  cat > "${version_dir}/settings.txt" <<EOF
+run_training=${run_training}
+run_visualization=${run_visualization}
+clear_training_logs=${clear_training_logs}
+include_gauss_newton=${include_gauss_newton}
+training_pretrain_epochs=${training_pretrain_epochs}
+training_gauss_newton_epochs=${training_gauss_newton_epochs}
+resolution_nlat=${resolution_nlat}
+resolution_nlon=${resolution_nlon}
+overwrite_visualization_outputs=${overwrite_visualization_outputs}
+visualization_channel=${visualization_channel}
+visualization_history_scale=${visualization_history_scale}
+visualization_forecast_error_scale=${visualization_forecast_error_scale}
+visualization_autoreg_steps=${visualization_autoreg_steps}
+visualization_output_freq=${visualization_output_freq}
+visualization_root=${visualization_root}
+visualization_version=${visualization_version}
+version_dir=${version_dir}
+EOF
 }
 
 validate_bool "run_training" "${run_training}"
 validate_bool "run_visualization" "${run_visualization}"
 validate_bool "clear_training_logs" "${clear_training_logs}"
 validate_bool "include_gauss_newton" "${include_gauss_newton}"
-validate_bool "clear_visualization_outputs" "${clear_visualization_outputs}"
+validate_bool "overwrite_visualization_outputs" "${overwrite_visualization_outputs}"
 
 print_settings
 

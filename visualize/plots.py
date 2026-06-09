@@ -45,6 +45,34 @@ def save_figure(fig: plt.Figure, path: Path) -> None:
     print(f"Saved: {path}")
 
 
+def display_metric_text(metric: str) -> str:
+    """Convert metric column names into plot-friendly display text."""
+    text = metric.replace("_mean", " mean").replace("_", " ")
+    replacements = {
+        "l1": "L1",
+        "l2": "L2",
+        "w11": "W11",
+        "ml": "ML",
+    }
+    return " ".join(replacements.get(part.lower(), part) for part in text.split())
+
+
+def title_case(text: str) -> str:
+    """Apply lightweight title capitalization for generated plot titles."""
+    small_words = {"a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to", "vs."}
+    words = text.split()
+    titled: List[str] = []
+    for i, word in enumerate(words):
+        lower = word.lower()
+        if i > 0 and lower in small_words:
+            titled.append(lower)
+        elif word.upper() in {"L1", "L2", "W11", "ML", "SGD"}:
+            titled.append(word.upper())
+        else:
+            titled.append(word[:1].upper() + word[1:])
+    return " ".join(titled)
+
+
 def resource_axis_name(resource: str) -> str:
     """Human-readable resource axis name."""
     if resource == "step":
@@ -126,7 +154,7 @@ def plot_history_learning_curve(
 
     ax.set_xlabel(resource_axis_name(resource))
     ax.set_ylabel(y_label)
-    ax.set_title(f"{y_label} vs {resource_axis_name(resource)}")
+    ax.set_title(title_case(f"{y_label} vs. {resource_axis_name(resource)}"))
     ax.set_yscale(yscale)
     ax.grid(True, axis="y", alpha=0.3)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True, framealpha=0.92)
@@ -158,7 +186,7 @@ def plot_history_hitting_curve(
 
     ax.set_xlabel(f"target {metric_label} threshold")
     ax.set_ylabel(y_label)
-    ax.set_title(f"First hitting {resource} vs target {metric_label}")
+    ax.set_title(title_case(f"first hitting {resource} vs. target {metric_label}"))
     ax.set_xscale(threshold_xscale)
     ax.grid(True, axis="y", alpha=0.3)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True, framealpha=0.92)
@@ -183,6 +211,7 @@ def plot_forecast_error_curve(
 ) -> None:
     """Plot forecast error history versus autoregressive rollout step."""
     column = roll.metric_column(error_metric)
+    display_column = display_metric_text(column)
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
 
     for run in rollout_runs:
@@ -198,8 +227,8 @@ def plot_forecast_error_curve(
             ax.fill_between(steps, values - std.to_numpy(), values + std.to_numpy(), alpha=0.12)
 
     ax.set_xlabel("autoregressive rollout step")
-    ax.set_ylabel(column)
-    ax.set_title(f"Forecast {column} over rollout")
+    ax.set_ylabel(display_column)
+    ax.set_title(title_case(f"forecast {display_column} over rollout"))
     ax.set_yscale(yscale)
     ax.grid(True, alpha=0.3)
     ax.legend()
@@ -246,13 +275,14 @@ def _annotate_bars(ax: plt.Axes, bars) -> None:
 def plot_forecast_accuracy_bar(rollout_runs: Sequence[roll.RolloutRun], error_metric: str, outdir: Path) -> None:
     """Plot aggregate forecast error from metrics.csv."""
     column = roll.metric_mean_column(error_metric)
+    display_column = display_metric_text(column)
     labels = [run.label for run in rollout_runs]
     values = np.array([run.metrics.get(column, np.nan) for run in rollout_runs], dtype=float)
 
     fig, ax = plt.subplots(figsize=(max(8.5, 1.25 * len(labels)), 5.4))
     bars = ax.bar(labels, values, color=_bar_colors(len(labels)), edgecolor="black", linewidth=0.7, alpha=0.88)
-    ax.set_ylabel(f"{column} (lower is better)")
-    ax.set_title(f"Aggregate forecast accuracy: {column}", fontweight="bold")
+    ax.set_ylabel(f"{display_column} (lower is better)")
+    ax.set_title(title_case(f"aggregate forecast accuracy: {display_column}"), fontweight="bold")
     _style_bar_axes(ax)
     _annotate_bars(ax, bars)
     fig.tight_layout()
@@ -278,7 +308,7 @@ def plot_forecast_runtime_ratio_bar(rollout_runs: Sequence[roll.RolloutRun], out
     bars = ax.bar(labels, values, color=_bar_colors(len(labels)), edgecolor="black", linewidth=0.7, alpha=0.88)
     ax.axhline(1.0, color="0.25", linestyle="--", linewidth=1.2, alpha=0.8, label="equal runtime")
     ax.set_ylabel("Runtime ratio")
-    ax.set_title("Forecast rollout runtime vs non-ML solver (lower is better)", fontweight="bold")
+    ax.set_title("Forecast Rollout Runtime vs. Non-ML Solver (Lower Is Better)", fontweight="bold")
     _style_bar_axes(ax)
     finite_heights = [bar.get_height() for bar in bars if np.isfinite(bar.get_height())]
     if finite_heights:
@@ -316,7 +346,8 @@ def plot_prediction_grid(
     ch = roll.CHANNEL_TO_INDEX[channel]
     truth = snapshots[0].truth_fields[ch]
     panels = [("Ground Truth", truth)] + [(snap.label, snap.prediction_fields[ch]) for snap in snapshots]
-    title = f"Final prediction comparison ({channel}, step {snapshots[0].step}; saved every {output_freq} step(s))"
+    channel_label = display_metric_text(channel)
+    title = f"Final Prediction Comparison ({channel_label}, Step {snapshots[0].step}; Saved Every {output_freq} Step(s))"
     output = outdir / f"forecast_prediction_grid_{channel}_final.png"
     plot_image_panels(
         panels,
@@ -325,7 +356,7 @@ def plot_prediction_grid(
         output,
         cmap="twilight_shifted",
         symmetric=True,
-        colorbar_label=f"{channel} value (shared color scale)",
+        colorbar_label=f"{channel_label} value (shared color scale)",
     )
 
 
@@ -354,7 +385,9 @@ def plot_error_grid(
 
     symmetric = error_mode == "signed"
     cmap = "RdBu_r" if symmetric else "viridis"
-    title = f"Final pointwise error ({channel}, {error_mode}, step {snapshots[0].step}; saved every {output_freq} step(s))"
+    channel_label = display_metric_text(channel)
+    error_mode_label = display_metric_text(error_mode)
+    title = f"Final Pointwise Error ({channel_label}, {error_mode_label}, Step {snapshots[0].step}; Saved Every {output_freq} Step(s))"
     output = outdir / f"forecast_error_grid_{channel}_final_{error_mode}.png"
     if error_mode == "signed":
         cbar_label = f"prediction − truth for {channel} (shared color scale)"
@@ -485,10 +518,10 @@ def plot_combined_spectra(
         raise ValueError("spectra_method must be 'spherical' or 'fft'")
 
     titles = [
-        "Rotational kinetic energy",
-        "Divergent kinetic energy",
-        "Potential energy",
-        "Total energy",
+        "Rotational Kinetic Energy",
+        "Divergent Kinetic Energy",
+        "Potential Energy",
+        "Total Energy",
     ]
     keys = ["rotational", "divergent", "potential", "total"]
     linestyles = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2))]
@@ -541,11 +574,11 @@ def plot_combined_spectra(
             ref_53_all = _scaled_power_law(ref_k_all, truth_values, -5.0 / 3.0)
             ref_3 = np.interp(k_ref, ref_k_all, ref_3_all)
             ref_53 = np.interp(k_ref, ref_k_all, ref_53_all)
-            ref_line_3, = ax.loglog(k_ref, ref_3, color="0.35", linestyle=":", linewidth=1.5, alpha=0.75, label=r"scaled $k^{-3}$")
-            ref_line_53, = ax.loglog(k_ref, ref_53, color="0.35", linestyle="-.", linewidth=1.5, alpha=0.75, label=r"scaled $k^{-5/3}$")
+            ref_line_3, = ax.loglog(k_ref, ref_3, color="0.35", linestyle=":", linewidth=1.5, alpha=0.75, label=r"Scaled $k^{-3}$")
+            ref_line_53, = ax.loglog(k_ref, ref_53, color="0.35", linestyle="-.", linewidth=1.5, alpha=0.75, label=r"Scaled $k^{-5/3}$")
             if ax is axes.ravel()[0]:
                 legend_handles.extend([ref_line_3, ref_line_53])
-                legend_labels.extend([r"scaled $k^{-3}$", r"scaled $k^{-5/3}$"])
+                legend_labels.extend([r"Scaled $k^{-3}$", r"Scaled $k^{-5/3}$"])
 
         ax.set_title(title, fontweight="bold")
         ax.set_xlabel("Wavenumber $l$")
@@ -555,7 +588,7 @@ def plot_combined_spectra(
             ax.set_xlim(left=max(1, k[0]), right=k[-1])
 
     fig.suptitle(
-        f"Final rollout spectra comparison (step {snapshots[0].step}; saved every {output_freq} step(s))",
+        f"Final Rollout Spectra Comparison (Step {snapshots[0].step}; Saved Every {output_freq} Step(s))",
         fontsize=14,
         fontweight="bold",
     )
@@ -685,7 +718,7 @@ def make_rollout_animation(
 
     # Use a figure-level title rather than per-axes text so the shared title is
     # retained by Pillow/FFMpeg writers across every rendered animation frame.
-    fig.suptitle(f"Rollout comparison: {channel}", color="white", fontsize=15, fontweight="bold")
+    fig.suptitle(f"Rollout Comparison: {display_metric_text(channel)}", color="white", fontsize=15, fontweight="bold")
     step_label = fig.text(
         0.5, 0.945,
         "",
@@ -704,7 +737,7 @@ def make_rollout_animation(
             im.set_data(snap.prediction_fields[ch])
         for im, snap in zip(im_errors, step_snaps):
             im.set_data(snap.prediction_fields[ch] - snap.truth_fields[ch])
-        step_label.set_text(f"rollout step {step}")
+        step_label.set_text(f"Rollout Step {step}")
         return [im_truth, *im_preds, *im_errors, step_label]
 
     ani = manimation.FuncAnimation(
@@ -764,10 +797,10 @@ def make_spectral_image_animation(
     # This mode displays the exact spectra PNGs emitted by forecast.py for each
     # optimizer.  It intentionally treats those PNGs as image panels rather than
     # recomputing spectra, preserving the original per-optimizer diagnostics.
-    fig.suptitle("Spectral analysis comparison", color="white", fontsize=15, fontweight="bold")
+    fig.suptitle("Spectral Analysis Comparison", color="white", fontsize=15, fontweight="bold")
     step_label = fig.text(
         0.5, 0.955,
-        f"rollout step {first_step}",
+        f"Rollout Step {first_step}",
         ha="center", va="top",
         color="white", fontsize=12, fontweight="bold",
     )
@@ -777,7 +810,7 @@ def make_spectral_image_animation(
         step, panels = frames[frame_index]
         for im, (_, path) in zip(images, panels):
             im.set_data(plt.imread(path))
-        step_label.set_text(f"rollout step {step}")
+        step_label.set_text(f"Rollout Step {step}")
         return [*images, step_label]
 
     ani = manimation.FuncAnimation(fig, update, frames=len(frames), interval=1000 / fps, blit=False)
@@ -828,7 +861,7 @@ def make_combined_spectral_animation(
     y_max = max(y_values) * 1.6 if y_values else 1.0
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-    fig.suptitle("Combined rollout spectra comparison", fontsize=15, fontweight="bold")
+    fig.suptitle("Combined Rollout Spectra Comparison", fontsize=15, fontweight="bold")
     step_label = fig.text(0.5, 0.935, "", ha="center", va="top", fontsize=11, fontweight="bold")
 
     line_sets = []
@@ -853,7 +886,7 @@ def make_combined_spectral_animation(
         step, truth_spectra, pred_spectra = spectral_frames[frame_index]
         pred_by_label = dict(pred_spectra)
         artists = [step_label]
-        step_label.set_text(f"rollout step {step}")
+        step_label.set_text(f"Rollout Step {step}")
         for ax, (key, truth_line, pred_lines) in zip(axes.ravel(), line_sets):
             k = np.asarray(truth_spectra["wavenumbers"])[1:]
             truth_values = np.asarray(truth_spectra[key])[1:]

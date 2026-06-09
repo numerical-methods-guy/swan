@@ -12,6 +12,11 @@ include_gauss_newton="${INCLUDE_GAUSS_NEWTON:-true}"
 # keep its epoch budget explicit and usually smaller than pretrain_epochs.
 gauss_newton_epochs="${GAUSS_NEWTON_EPOCHS:-2}"
 
+# Training grid resolution. Defaults match config_paradis.yaml and can be
+# overridden by the cluster wrapper through TRAIN_NLAT/TRAIN_NLON.
+train_nlat="${TRAIN_NLAT:-128}"
+train_nlon="${TRAIN_NLON:-256}"
+
 optimizers=(
   adam
   adamw
@@ -54,5 +59,7 @@ for opt in "${optimizers[@]}"; do
     --config config_paradis.yaml \
     --optimizer "${opt}" \
     --experiment.name "${opt}" \
+    --data.nlat "${train_nlat}" \
+    --data.nlon "${train_nlon}" \
     --training.pretrain_epochs "${opt_epochs}"
 done
