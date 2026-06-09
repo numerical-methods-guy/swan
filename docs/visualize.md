@@ -496,10 +496,20 @@ figures_forecast/
 | `--outdir` | no | `./figures_forecast` | path | Folder for final comparison figures. |
 | `--device` | no | auto | `cpu`, `cuda`, etc. | Optional device for real rollout. |
 | `--synthetic_demo` | no | off | flag | Generate artificial rollout data for testing only. |
+| `--reuse_rollouts` | no | off | flag | Skip model rollout execution and plot from existing per-optimizer folders in `--rollout_dir`. |
 
 ---
 
 ## Important Forecast Concepts
+
+### `--reuse_rollouts`
+
+Use `--reuse_rollouts` when the rollout tensors and metrics already exist and
+you only want to make another grouped set of forecast figures. This is accurate
+when the saved rollouts were generated with the same checkpoint, config,
+`--autoreg_steps`, `--output_freq`, seed, initial-condition setup, and channel
+settings. The flag is useful for comparing different subsets of optimizers
+without rerunning the expensive forecast step.
 
 ### `--autoreg_steps`
 

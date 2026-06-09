@@ -125,7 +125,20 @@ def run_forecast(args: argparse.Namespace) -> None:
     outdir = ensure_outdir(args.outdir)
     rollout_dir = ensure_outdir(args.rollout_dir)
 
-    if args.synthetic_demo:
+    if args.reuse_rollouts:
+        if args.synthetic_demo:
+            raise ValueError("--reuse_rollouts loads existing data and cannot be combined with --synthetic_demo.")
+        if not args.labels:
+            raise ValueError("forecast --reuse_rollouts requires --labels.")
+
+        # Reuse mode intentionally skips checkpoint loading and model execution.
+        # It is for making additional grouped figures from rollout folders that
+        # were already generated with the same forecast settings.
+        rollout_runs = roll.load_rollout_runs(
+            [rollout_dir / roll.sanitize_label(label) for label in args.labels],
+            args.labels,
+        )
+    elif args.synthetic_demo:
         labels = args.labels or ["Adam", "MUD", "Muon"]
         rollout_runs = roll.create_synthetic_rollouts(
             labels=labels,
@@ -155,12 +168,14 @@ def run_forecast(args: argparse.Namespace) -> None:
             device=args.device,
         )
 
-    # Always reload from disk after generation so every plotting path exercises
-    # the same code users rely on when re-loading pre-computed rollouts.
-    rollout_runs = roll.load_rollout_runs(
-        [run.rollout_dir for run in rollout_runs],
-        [run.label for run in rollout_runs],
-    )
+    if not args.reuse_rollouts:
+        # Always reload from disk after generation so every plotting path
+        # exercises the same code users rely on when re-loading pre-computed
+        # rollouts.
+        rollout_runs = roll.load_rollout_runs(
+            [run.rollout_dir for run in rollout_runs],
+            [run.label for run in rollout_runs],
+        )
     snapshots = roll.load_snapshots_for_step(rollout_runs, args.summary_step)
 
     plot_forecast_error_curve(rollout_runs, args.error_metric, outdir, yscale=args.forecast_error_scale)
@@ -300,6 +315,7 @@ def build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--outdir", default="./figures_forecast", help="Directory for final forecast figures. Default: ./figures_forecast")
     fc.add_argument("--device", default=None, help="Optional real-rollout device, e.g. cuda or cpu. Default: auto")
     fc.add_argument("--synthetic_demo", action="store_true", help="Generate artificial rollout data instead of loading real checkpoints. For tests only.")
+    fc.add_argument("--reuse_rollouts", action="store_true", help="Skip model rollout execution and plot from existing per-optimizer folders in --rollout_dir.")
     fc.set_defaults(func=run_forecast)
 
     # animate ----------------------------------------------------------------
