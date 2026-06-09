@@ -59,6 +59,9 @@ Config values can be overridden from the command line using dot notation:
 python train.py --config config_paradis.yaml --model.paradis.hidden_dim 64 --training.pretrain_epochs 50
 ```
 
+For the optimizer sweep, visualization, and cluster wrapper bash scripts, see
+[docs/bash_scripts.md](docs/bash_scripts.md).
+
 ---
 
 ## Inference
