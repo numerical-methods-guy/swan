@@ -161,7 +161,9 @@ class MudNewStrategy(TrainingStrategy):
                 train_mud_cfg.get("beta", train_mud_cfg.get("beta_mud", 0.95)),
             ),
         )
-        adamw_betas = _resolve_adamw_betas({**train_mud_cfg, **train_cfg})
+        adamw_betas = _resolve_adamw_betas(
+            {**train_adamw_cfg, **train_mud_cfg, **train_cfg}
+        )
         mud_passes = train_cfg.get(
             "mud_passes",
             train_mud_cfg.get("passes", train_mud_cfg.get("mud_passes", 1)),

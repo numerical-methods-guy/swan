@@ -35,7 +35,9 @@ def mud_whiten(M: torch.Tensor, passes: int = 1, eps: float = 1e-8) -> torch.Ten
         Q = Q / Q.norm(dim=1, keepdim=True).clamp_min(eps)  # Row normalization
         G = Q @ Q.t()  # Row Gram (k,k)
         T = torch.tril(G)  # Lower-triangular of Gram
+        T.diagonal().copy_(T.diagonal().clamp_min(eps))
         Q = torch.linalg.solve_triangular(T, Q, upper=False)  # Forward solve: T X = Q
+        Q = torch.nan_to_num(Q, nan=0.0, posinf=0.0, neginf=0.0)
         Q = Q / Q.norm(dim=1, keepdim=True).clamp_min(eps)  # Renormalize rows
 
     if transposed:
