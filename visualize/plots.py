@@ -1118,15 +1118,21 @@ def make_rollout_animation(
 
     # Use a figure-level title rather than per-axes text so the shared title is
     # retained by Pillow/FFMpeg writers across every rendered animation frame.
-    fig.suptitle(f"Rollout Comparison: {display_metric_text(channel)}", color="white", fontsize=15, fontweight="bold")
+    fig.suptitle(
+        f"Rollout Comparison: {display_metric_text(channel)}",
+        color="white",
+        fontsize=15,
+        fontweight="bold",
+        y=0.985,
+    )
     step_label = fig.text(
-        0.5, 0.945,
+        0.5, 0.925,
         "",
         ha="center", va="top",
         color="white", fontsize=12, fontweight="bold",
     )
 
-    fig.tight_layout(rect=[0, 0.0, 1, 0.92])
+    fig.tight_layout(rect=[0, 0.0, 1, 0.875])
 
     def update(frame_index: int):
         step_snaps = frames[frame_index]
@@ -1232,10 +1238,11 @@ def make_rollout_error_animation(
         color="white",
         fontsize=15,
         fontweight="bold",
+        y=0.985,
     )
     step_label = fig.text(
         0.5,
-        0.945,
+        0.925,
         "",
         ha="center",
         va="top",
@@ -1243,7 +1250,7 @@ def make_rollout_error_animation(
         fontsize=12,
         fontweight="bold",
     )
-    fig.tight_layout(rect=[0, 0.0, 1, 0.91])
+    fig.tight_layout(rect=[0, 0.0, 1, 0.875])
 
     def update(frame_index: int):
         step_snaps = frames[frame_index]
