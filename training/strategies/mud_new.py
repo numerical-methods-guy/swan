@@ -16,7 +16,7 @@ from training.strategies.base import TrainingStrategy
 from training.strategies.mud import MUDOptimizer, _resolve_adamw_betas
 
 
-EXCLUDED_MUD_NEW_1X1_MODULES = {"output_proj"}
+EXCLUDED_MUD_NEW_1X1_MODULES = {"output_proj", "velocity_nets", "advection", "reaction", "diffusion"}
 
 
 def _resolve_flat_lr(train_cfg: dict, module: pl.LightningModule) -> float:

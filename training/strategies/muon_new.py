@@ -16,7 +16,7 @@ from torch import nn
 from training.strategies.base import TrainingStrategy
 
 
-EXCLUDED_MUON_NEW_1X1_MODULES = {"output_proj", "velocity_nets"}
+EXCLUDED_MUON_NEW_1X1_MODULES = {"output_proj", "velocity_nets", "advection", "reaction"}
 
 
 def _resolve_flat_lr(train_cfg: dict, module: pl.LightningModule) -> float:
