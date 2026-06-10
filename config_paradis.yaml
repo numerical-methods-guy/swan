@@ -29,9 +29,9 @@ logging:
 model:
   paradis:
     # --- Top-level model parameters ---
-    hidden_dim: 32        # cfg.model.latent_size in upstream
-    num_layers: 4         # Number of ADR layers
-    num_vels: 6           # cfg.model.velocity_vectors in upstream
+    hidden_dim: 64        # cfg.model.latent_size in upstream
+    num_layers: 6         # Number of ADR layers
+    num_vels: 4           # cfg.model.velocity_vectors in upstream
     base_dt: 60           # Must match data.dt; cfg.model.base_dt in upstream
     interpolation: "bicubic"  # cfg.model.adv_interpolation in upstream; "bilinear" or "bicubic"
     bias_channels: 2      # cfg.model.bias_channels in upstream
@@ -76,19 +76,19 @@ training:
   lr_milestones: [10, 16]
   lr_gamma: 0.5
   adam:
-    learning_rate: 1.0e-2
-    finetune_learning_rate: 1.0e-3
-    beta1: 0.9
-    beta2: 0.999
+    learning_rate: 0.0014249902811518448
+    finetune_learning_rate: 0.00014249902811518448
+    beta1: 0.9406397659713441
+    beta2: 0.9993694676733629
     epsilon: 1.0e-8
     weight_decay: 0.0
   adamw: 
-    learning_rate: 1.0e-2
-    finetune_learning_rate: 1.0e-3
-    beta1: 0.9
-    beta2: 0.999
+    learning_rate: 0.0016569627972771324
+    finetune_learning_rate: 0.00016569627972771324
+    beta1: 0.931111094646117
+    beta2: 0.919835761028893
     epsilon: 1.0e-8
-    weight_decay: 0.01
+    weight_decay: 0.0001
   gauss_newton:
     method: "matrix_free"  # matrix_free | explicit
     damping: 1.0e-3
@@ -102,9 +102,9 @@ training:
     momentum: 0.95
     weight_decay: 0.0
   sgd:
-    learning_rate: 1.0e-2
+    learning_rate: 0.0019660079628529524
     finetune_learning_rate: 1.0e-3
-    momentum: 0.9
+    momentum: 0.9894502541863339
     weight_decay: 0.0
   mud:
     learning_rate: 1.0e-2
