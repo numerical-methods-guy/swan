@@ -61,6 +61,7 @@ Quick synthetic forecast demo::
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -78,6 +79,7 @@ from visualize.plots import (
     plot_combined_spectra,
     plot_combined_spectra_percent_difference,
     make_rollout_animation,
+    make_rollout_error_animation,
     make_combined_spectral_animation,
     make_combined_spectral_percent_difference_animation,
     make_spectral_image_animation,
@@ -228,8 +230,11 @@ def run_animate(args: argparse.Namespace) -> None:
         if not args.labels:
             raise ValueError("animate requires --labels unless --synthetic_demo is used.")
         labels = args.labels
+        rollout_names = args.rollout_names or labels
+        if len(rollout_names) != len(labels):
+            raise ValueError("--rollout_names must have the same length as --labels.")
         rollout_dirs = [
-            Path(rollout_dir) / roll.sanitize_label(label) for label in labels
+            Path(rollout_dir) / roll.sanitize_label(name) for name in rollout_names
         ]
 
     frames = roll.load_animation_frames(rollout_dirs, labels)
@@ -240,6 +245,23 @@ def run_animate(args: argparse.Namespace) -> None:
         output=args.output,
         show_error=args.show_error,
     )
+    if args.with_error_output:
+        Path(args.with_error_output).parent.mkdir(parents=True, exist_ok=True)
+        make_rollout_animation(
+            frames=frames,
+            channel=args.channel,
+            fps=args.fps,
+            output=args.with_error_output,
+            show_error=True,
+        )
+    if args.error_output:
+        Path(args.error_output).parent.mkdir(parents=True, exist_ok=True)
+        make_rollout_error_animation(
+            frames=frames,
+            channel=args.channel,
+            fps=args.fps,
+            output=args.error_output,
+        )
     spectral_output = args.spectral_output or _default_spectral_output(args.output)
     Path(spectral_output).parent.mkdir(parents=True, exist_ok=True)
     # Two spectral animation modes are intentionally separated:
@@ -286,7 +308,12 @@ def _default_spectral_percent_output(output: str | Path) -> Path:
     """Return a sibling path for the signed-percent spectral animation."""
     output = Path(output)
     suffix = output.suffix or ".gif"
-    return output.with_name(f"{output.stem}_percent_difference{suffix}")
+    match = re.match(r"^(?P<base>.+?)(?P<version>_v\d+)$", output.stem)
+    if match:
+        stem = f"{match.group('base')}_percent_difference{match.group('version')}"
+    else:
+        stem = f"{output.stem}_percent_difference"
+    return output.with_name(f"{stem}{suffix}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -353,8 +380,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     an.add_argument("--rollout_dir", default="./rollout_results", help="Directory containing per-optimizer rollout folders. Default: ./rollout_results")
     an.add_argument("--labels", nargs="+", help="Optimizer labels matching the subfolder names. Required unless --synthetic_demo is used.")
+    an.add_argument("--rollout_names", nargs="+", help="Optional rollout subfolder names matching --labels. Useful when display labels differ from folder names.")
     an.add_argument("--channel", choices=tuple(roll.CHANNEL_TO_INDEX.keys()), default="vorticity", help="Field channel to animate. Default: vorticity")
     an.add_argument("--output", default="./figures_forecast/rollout_fields.gif", help="Output file path for field animation (.gif or .mp4). Default: ./figures_forecast/rollout_fields.gif")
+    an.add_argument("--with_error_output", default=None, help="Optional companion field animation with signed error panels.")
+    an.add_argument("--error_output", default=None, help="Optional error-only animation output path.")
     an.add_argument("--spectral_output", default=None, help="Output file path for spectral-analysis animation. Default: derive from --output")
     an.add_argument("--split_spectral", "--split-spectral", action="store_true", help="Show each optimizer's saved spectral-analysis image separately. Default: combine all optimizers in one spherical-harmonic graph.")
     an.add_argument("--fps", type=int, default=8, help="Frames per second. Default: 8")

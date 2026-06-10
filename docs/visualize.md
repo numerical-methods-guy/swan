@@ -290,7 +290,7 @@ figures_history/
 | `--plot` | no | `learning_curve` | `learning_curve`, `hitting_curve`, `both` | Which history plot type to generate. |
 | `--error_metric` | no | `loss` | `loss`, `l1`, `l2`, `sq_l2`, `w11` | Error/loss metric. |
 | `--efficiency_metric` | no | `both` | `step`, `time`, `both` | X-axis resource for history plots. |
-| `--history_scale` | no | `linear` | `linear`, `log` | Scale for history plots. For learning curves, this controls the metric y-axis; for hitting curves, this controls the target-threshold x-axis. |
+| `--history_scale` | no | `linear` | `linear`, `log` | Scale for validation history plots. Learning curves use it on the metric y-axis; hitting curves use it on the target-threshold x-axis. Training plots stay linear. |
 | `--outdir` | no | `./figures` | path | Folder where history figures are saved. |
 
 ---
@@ -341,13 +341,14 @@ y-axis = selected training/validation metric
 one curve per optimizer
 ```
 
-The legend is placed outside the plot area so it does not cover overlapping
-curves. Validation learning curves show markers at each logged validation point;
-training curves use lines without markers to avoid clutter when many training
-points are logged. Use `--history_scale log` when relative loss/error
-differences are more important than absolute differences. For learning curves,
-this makes the metric y-axis logarithmic; for hitting curves, this makes the
-target-threshold x-axis logarithmic while keeping first-hit step/time linear.
+The legend uses the shared optimizer style and is placed automatically. Learning
+and hitting curves use markers sparingly along each optimizer line so dense logs
+remain readable. Use `--history_scale log` when relative loss/error differences
+are more important than absolute differences. For learning curves, this makes
+the metric y-axis logarithmic; for hitting curves, this makes the target-threshold
+x-axis logarithmic while keeping first-hit step/time linear. Log-scaled history
+axes draw dense minor ticks/gridlines at 2 through 9 within each decade, with
+numeric minor labels only at 2, 3, 5, and 8.
 
 Example:
 
@@ -583,7 +584,7 @@ Controls how `forecast_spectra_final.png` computes spectra:
 --spherical_method fft
 ```
 
-`spherical` is the default for real rollouts and uses the same spherical-harmonic diagnostic as `forecast.py`. `fft` uses the grid-based FFT fallback from `rollout_utils.py`. Synthetic demo rollouts always use the FFT fallback because they do not have a SWAN spherical-harmonic transform.
+`spherical` is the default for real rollouts and uses the same spherical-harmonic diagnostic as `forecast.py`. `fft` uses the grid-based FFT fallback in the visualization rollout utilities. Synthetic demo rollouts always use the FFT fallback because they do not have a SWAN spherical-harmonic transform.
 
 ---
 
@@ -739,7 +740,10 @@ Each subplot includes ground truth and all optimizers, with one shared legend.
 
 The percent-difference companion uses the same 2-by-2 layout, but plots signed
 percentage difference from ground truth for each optimizer. It does not draw
-the ground-truth spectrum or the reference slope curves.
+the ground-truth spectrum or the reference slope curves. Its x-axis is logarithmic
+and its y-axis is a signed symmetric log scale for every channel, so negative
+and positive percentage differences are shown consistently with a linear region
+around zero. The four panels share one robust symmetric y-limit.
 
 By default this figure uses spherical-harmonic spectra for real rollouts. Pass `--spherical_method fft` to generate the same combined plot with the grid FFT fallback instead.
 
@@ -880,9 +884,12 @@ python -m visualize animate \
 | Flag | Required? | Default | Choices | Meaning |
 |---|---:|---|---|---|
 | `--labels` | yes, unless `--synthetic_demo` | synthetic defaults to `Adam MUD Muon` | strings | Optimizer labels matching subfolders in `--rollout_dir`. |
+| `--rollout_names` | no | same as `--labels` | strings | Optional rollout subfolder names matching `--labels`. |
 | `--rollout_dir` | no | `./rollout_results` | path | Directory containing per-optimizer rollout folders. |
 | `--channel` | no | `vorticity` | `h`, `vorticity`, `divergence` | Field channel to animate. |
 | `--output` | no | `./figures_forecast/rollout_fields.gif` | path | Output file for field animation (.gif or .mp4). |
+| `--with_error_output` | no | none | path | Optional companion field animation that includes signed error panels. |
+| `--error_output` | no | none | path | Optional error-only animation output. |
 | `--spectral_output` | no | derived from `--output` | path | Output file for spectral-analysis animation (.gif or .mp4). |
 | `--split_spectral` | no | off | flag | Show each optimizer's saved spectral-analysis image separately. By default, all optimizers are combined in one spherical-harmonic graph. |
 | `--fps` | no | `8` | integer | Frames per second. |
@@ -914,6 +921,21 @@ Each error panel shows `prediction − truth` on a symmetric shared color scale.
 The spatial animation has a shared title and rollout-step subtitle. The default
 spectral animation also has a shared title and combines all optimizers into one
 animated spherical-harmonic spectral-analysis graph.
+
+For focused slide exports, use `--with_error_output` and `--error_output` to
+write companion GIFs without changing the main value-only `--output` file:
+
+```bash
+python -m visualize animate \
+  --rollout_dir ./rollout_results/shared_rollouts \
+  --labels MUD Muon \
+  --rollout_names mud muon \
+  --channel vorticity \
+  --output ./focused_animations/focused_mud_muon/focused_mud_muon_rollout_fields_v3.gif \
+  --with_error_output ./focused_animations/focused_mud_muon/focused_mud_muon_rollout_fields_with_error_v3.gif \
+  --error_output ./focused_animations/focused_mud_muon/focused_mud_muon_rollout_error_v3.gif \
+  --spectral_output ./focused_animations/focused_mud_muon/focused_mud_muon_rollout_spectra_v3.gif
+```
 
 ```bash
 python -m visualize animate \

@@ -58,6 +58,14 @@ visualization_history_scale="log"
 visualization_forecast_error_scale="log"
 visualization_autoreg_steps=100
 visualization_output_freq=5
+# Animation playback mode: standard, smooth, or slow. Smooth uses higher FPS;
+# slow chooses FPS from autoreg_steps/output_freq for audience-friendly playback.
+visualization_animation_pacing="slow"
+enable_focused_animations=true
+# User-facing focused animation selection. Use optimizer IDs from this set:
+# adam, adamw, gauss_newton, mud, muon, sgd.
+# Display labels and output folder names are derived internally.
+focused_animation_optimizers=(adam adamw)
 
 # Versioned visualization outputs. With visualization_version="auto",
 # overwrite_visualization_outputs controls whether the wrapper creates the next
@@ -91,6 +99,9 @@ print_settings() {
   echo "visualization_forecast_error_scale=${visualization_forecast_error_scale}"
   echo "visualization_autoreg_steps=${visualization_autoreg_steps}"
   echo "visualization_output_freq=${visualization_output_freq}"
+  echo "visualization_animation_pacing=${visualization_animation_pacing}"
+  echo "enable_focused_animations=${enable_focused_animations}"
+  echo "focused_animation_optimizers=${focused_animation_optimizers[*]}"
   echo "visualization_root=${visualization_root}"
   echo "visualization_version=${visualization_version}"
 }
@@ -123,6 +134,10 @@ run_training_phase() {
 run_visualization_phase() {
   local clear_answer="n"
   local version_dir
+  local export_suffix
+  local focused_group_name
+  local focused_optimizers
+  local focused_labels
 
   case "${overwrite_visualization_outputs}" in
     true)
@@ -136,11 +151,16 @@ run_visualization_phase() {
   esac
 
   version_dir="$(prepare_visualization_version)"
+  export_suffix="$(animation_export_suffix "${version_dir}")"
+  focused_group_name="$(focused_animation_group_name_env)"
+  focused_optimizers="$(focused_animation_optimizers_env)"
+  focused_labels="$(focused_animation_labels_env)"
   write_visualization_settings "${version_dir}"
 
   echo "=== Visualization phase ==="
   echo "Visualization version directory: ${version_dir}"
-  printf '%s\n' "${clear_answer}" | env INCLUDE_GAUSS_NEWTON="${include_gauss_newton}" VIS_CHANNEL="${visualization_channel}" HISTORY_SCALE="${visualization_history_scale}" FORECAST_ERROR_SCALE="${visualization_forecast_error_scale}" AUTOREG_STEPS="${visualization_autoreg_steps}" OUTPUT_FREQ="${visualization_output_freq}" VIS_NLAT="${resolution_nlat}" VIS_NLON="${resolution_nlon}" FIGURES_HISTORY_ROOT="${version_dir}/figures_history" FIGURES_FORECAST_ROOT="${version_dir}/figures_forecast" ROLLOUT_ROOT="${version_dir}/rollout_results" bash visualize_all_optimizers.sh
+  echo "Animation export suffix: ${export_suffix}"
+  printf '%s\n' "${clear_answer}" | env INCLUDE_GAUSS_NEWTON="${include_gauss_newton}" VIS_CHANNEL="${visualization_channel}" HISTORY_SCALE="${visualization_history_scale}" FORECAST_ERROR_SCALE="${visualization_forecast_error_scale}" AUTOREG_STEPS="${visualization_autoreg_steps}" OUTPUT_FREQ="${visualization_output_freq}" ANIMATION_PACING="${visualization_animation_pacing}" VIS_NLAT="${resolution_nlat}" VIS_NLON="${resolution_nlon}" ENABLE_FOCUSED_ANIMATIONS="${enable_focused_animations}" FOCUSED_ANIMATION_GROUP_NAME="${focused_group_name}" FOCUSED_ANIMATION_OPTIMIZERS="${focused_optimizers}" FOCUSED_ANIMATION_LABELS="${focused_labels}" VIS_EXPORT_SUFFIX="${export_suffix}" FIGURES_HISTORY_ROOT="${version_dir}/figures_history" FIGURES_FORECAST_ROOT="${version_dir}/figures_forecast" FOCUSED_ANIMATION_ROOT="${version_dir}/focused_animations" ROLLOUT_ROOT="${version_dir}/rollout_results" bash visualize_all_optimizers.sh
 }
 
 prepare_visualization_version() {
@@ -197,6 +217,62 @@ prepare_visualization_version() {
   esac
 }
 
+animation_export_suffix() {
+  local version_dir="$1"
+  local version_name
+  version_name="$(basename "${version_dir}")"
+
+  if [[ "${version_name}" =~ ^version_([0-9]+)$ ]]; then
+    printf '_v%s\n' "${BASH_REMATCH[1]}"
+  else
+    version_name="${version_name//[^A-Za-z0-9]/_}"
+    printf '_%s\n' "${version_name}"
+  fi
+}
+
+focused_animation_label_for_optimizer() {
+  case "$1" in
+    adam) printf 'Adam\n' ;;
+    adamw) printf 'AdamW\n' ;;
+    gauss_newton) printf 'Gauss-Newton\n' ;;
+    mud) printf 'MUD\n' ;;
+    muon) printf 'Muon\n' ;;
+    sgd) printf 'SGD\n' ;;
+    *)
+      echo "Error: unknown focused optimizer '$1'. Use one of: adam adamw gauss_newton mud muon sgd." >&2
+      exit 1
+      ;;
+  esac
+}
+
+focused_animation_group_name_env() {
+  if [[ "${#focused_animation_optimizers[@]}" -eq 0 ]]; then
+    echo "Error: focused_animation_optimizers must contain at least one optimizer." >&2
+    exit 1
+  fi
+  printf 'focused_%s\n' "$(IFS=_; printf '%s' "${focused_animation_optimizers[*]}")"
+}
+
+focused_animation_optimizers_env() {
+  local optimizer
+  for optimizer in "${focused_animation_optimizers[@]}"; do
+    focused_animation_label_for_optimizer "${optimizer}" >/dev/null
+  done
+  printf '%s\n' "${focused_animation_optimizers[*]}"
+}
+
+focused_animation_labels_env() {
+  local optimizer
+  local label
+  local values=()
+
+  for optimizer in "${focused_animation_optimizers[@]}"; do
+    label="$(focused_animation_label_for_optimizer "${optimizer}")"
+    values+=("${label}")
+  done
+  printf '%s\n' "${values[*]}"
+}
+
 write_visualization_settings() {
   local version_dir="$1"
 
@@ -215,6 +291,9 @@ visualization_history_scale=${visualization_history_scale}
 visualization_forecast_error_scale=${visualization_forecast_error_scale}
 visualization_autoreg_steps=${visualization_autoreg_steps}
 visualization_output_freq=${visualization_output_freq}
+visualization_animation_pacing=${visualization_animation_pacing}
+enable_focused_animations=${enable_focused_animations}
+focused_animation_optimizers=${focused_animation_optimizers[*]}
 visualization_root=${visualization_root}
 visualization_version=${visualization_version}
 version_dir=${version_dir}
@@ -226,6 +305,11 @@ validate_bool "run_visualization" "${run_visualization}"
 validate_bool "clear_training_logs" "${clear_training_logs}"
 validate_bool "include_gauss_newton" "${include_gauss_newton}"
 validate_bool "overwrite_visualization_outputs" "${overwrite_visualization_outputs}"
+validate_bool "enable_focused_animations" "${enable_focused_animations}"
+case "${visualization_animation_pacing}" in
+  standard|smooth|slow) ;;
+  *) echo "Error: visualization_animation_pacing must be standard, smooth, or slow." >&2; exit 1 ;;
+esac
 
 print_settings
 

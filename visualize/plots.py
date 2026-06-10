@@ -22,7 +22,7 @@ matplotlib.use("Agg")
 from visualize import mpl_style  # noqa: F401  # apply M2PI report typography
 import matplotlib.pyplot as plt
 import matplotlib.animation as manimation
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import FixedLocator, FuncFormatter, LogFormatterMathtext, LogLocator, NullFormatter, ScalarFormatter
 
 from visualize import history as hist
 from visualize import rollout as roll
@@ -58,6 +58,11 @@ def display_metric_text(metric: str) -> str:
     return " ".join(replacements.get(part.lower(), part) for part in text.split())
 
 
+def axis_label_text(text: str) -> str:
+    """Format generated axis labels with title-style capitalization."""
+    return title_case(text) if text else text
+
+
 def title_case(text: str) -> str:
     """Apply lightweight title capitalization for generated plot titles."""
     small_words = {"a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to", "vs."}
@@ -83,24 +88,251 @@ def resource_axis_name(resource: str) -> str:
     return resource
 
 
-def history_line_style(index: int) -> Dict[str, object]:
+OPTIMIZER_STYLES: Dict[str, Dict[str, object]] = {
+    "adam": {"color": "#4E79A7", "linestyle": "-", "marker": "o", "linewidth": 1.9, "alpha": 0.88},
+    "adamw": {"color": "#59A14F", "linestyle": "--", "marker": "s", "linewidth": 1.9, "alpha": 0.88},
+    "mud": {"color": "#F28E2B", "linestyle": "-", "marker": "^", "linewidth": 2.25, "alpha": 0.96},
+    "muon": {"color": "#E15759", "linestyle": "-", "marker": "D", "linewidth": 2.25, "alpha": 0.96},
+    "sgd": {"color": "#9C755F", "linestyle": ":", "marker": "v", "linewidth": 1.75, "alpha": 0.78},
+    "gaussnewton": {"color": "#B07AA1", "linestyle": "-.", "marker": "x", "linewidth": 1.75, "alpha": 0.78},
+}
+
+
+def _style_key(label: str) -> str:
+    """Normalize optimizer display labels to stable style keys."""
+    return "".join(ch for ch in label.lower() if ch.isalnum())
+
+
+def optimizer_line_style(label: str, index: int = 0, include_marker: bool = True) -> Dict[str, object]:
+    """Return a consistent line style for an optimizer label across plots."""
+    fallback_colors = plt.get_cmap("tab10").colors
+    base = dict(OPTIMIZER_STYLES.get(_style_key(label), {}))
+    if not base:
+        base = {
+            "color": fallback_colors[index % len(fallback_colors)],
+            "linestyle": ("-", "--", "-.", ":")[index % 4],
+            "marker": ("o", "s", "^", "D", "v", "P", "X", "*")[index % 8],
+            "linewidth": 1.9,
+            "alpha": 0.9,
+        }
+    if include_marker:
+        color = base["color"]
+        base.update({
+            "markersize": 3.0,
+            "markerfacecolor": "white",
+            "markeredgecolor": color,
+            "markeredgewidth": 0.85,
+        })
+    else:
+        base.pop("marker", None)
+    return base
+
+
+def history_line_style(label: str, index: int) -> Dict[str, object]:
     """Return a distinguishable line style for crowded optimizer history plots."""
-    colors = plt.get_cmap("tab10").colors
-    linestyles = ("-", "--", "-.", ":")
-    markers = ("o", "s", "^", "D", "v", "P", "X", "*")
-    color = colors[index % len(colors)]
-    return {
-        "color": color,
-        "linestyle": linestyles[index % len(linestyles)],
-        "linewidth": 2.0,
-        "alpha": 0.9,
-        "marker": markers[index % len(markers)],
-        "markersize": 3.2,
-        "markerfacecolor": "white",
-        "markeredgecolor": color,
-        "markeredgewidth": 0.9,
-        "zorder": 10 + index,
-    }
+    style = optimizer_line_style(label, index=index, include_marker=True)
+    style["zorder"] = 10 + index
+    return style
+
+
+def apply_log_axis_style(ax: plt.Axes, axis: str) -> None:
+    """Add readable minor ticks and faint gridlines to a log-scaled axis."""
+    major_locator = LogLocator(base=10.0)
+    major_formatter = LogFormatterMathtext(base=10.0)
+    minor_locator = LogLocator(base=10.0, subs=tuple(float(i) for i in range(2, 10)))
+    formatter = FuncFormatter(_log_minor_tick_label)
+    if axis == "x":
+        _expand_log_axis_limits(ax, "x")
+        ax.xaxis.set_major_locator(major_locator)
+        ax.xaxis.set_major_formatter(major_formatter)
+        ax.xaxis.set_minor_locator(minor_locator)
+        ax.xaxis.set_minor_formatter(formatter)
+        ax.tick_params(axis="x", which="minor", labelsize=7, pad=2)
+        ax.grid(True, axis="x", which="minor", alpha=0.12, linewidth=0.55)
+    elif axis == "y":
+        _expand_log_axis_limits(ax, "y")
+        ax.yaxis.set_major_locator(major_locator)
+        ax.yaxis.set_major_formatter(major_formatter)
+        ax.yaxis.set_minor_locator(minor_locator)
+        ax.yaxis.set_minor_formatter(formatter)
+        ax.tick_params(axis="y", which="minor", labelsize=7, pad=2)
+        ax.grid(True, axis="y", which="minor", alpha=0.12, linewidth=0.55)
+
+
+def apply_symlog_axis_style(ax: plt.Axes, linthresh: float = 10.0) -> None:
+    """Add readable signed log ticks, including the linear region near zero."""
+    ax.yaxis.set_major_locator(FixedLocator(_signed_percent_major_ticks(ax, linthresh)))
+    ax.yaxis.set_major_formatter(FuncFormatter(_signed_percent_tick_label))
+    ax.yaxis.set_minor_locator(FixedLocator(_signed_percent_minor_ticks(ax, linthresh)))
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    ax.grid(True, axis="y", which="minor", alpha=0.12, linewidth=0.55)
+
+
+def apply_percent_difference_y_axis(ax: plt.Axes, y_limit: float, linthresh: float = 10.0) -> None:
+    """Style signed percent-difference axes with readable tick density."""
+    ax.set_ylim(-y_limit, y_limit)
+    ax.set_yscale("symlog", linthresh=linthresh)
+    apply_symlog_axis_style(ax, linthresh=linthresh)
+    ax.tick_params(axis="y", which="minor", length=3, width=0.6)
+
+
+def _signed_percent_major_ticks(ax: plt.Axes, linthresh: float) -> List[float]:
+    """Return symmetric major ticks for signed percentage symlog axes."""
+    low, high = ax.get_ylim()
+    limit = max(abs(float(low)), abs(float(high)), linthresh)
+    positive_ticks = [5.0, linthresh]
+    decade = linthresh * 10.0
+    while decade <= limit * 1.0001:
+        positive_ticks.append(decade)
+        decade *= 10.0
+    ticks = [-tick for tick in reversed(positive_ticks) if tick <= limit * 1.0001]
+    ticks.extend([0.0, *[tick for tick in positive_ticks if tick <= limit * 1.0001]])
+    return ticks
+
+
+def _signed_percent_minor_ticks(ax: plt.Axes, linthresh: float) -> List[float]:
+    """Return dense minor ticks for both sides of a signed percentage symlog axis."""
+    low, high = ax.get_ylim()
+    limit = max(abs(float(low)), abs(float(high)), linthresh)
+    minor_abs = [value for value in np.arange(1.0, linthresh, 1.0) if not math.isclose(value, 5.0)]
+    decade = linthresh
+    while decade <= limit * 1.0001:
+        for multiplier in (2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0):
+            value = decade * multiplier
+            if value <= limit * 1.0001:
+                minor_abs.append(value)
+        decade *= 10.0
+    return [-tick for tick in reversed(minor_abs)] + minor_abs
+
+
+def _signed_percent_tick_label(value: float, _pos: int) -> str:
+    """Format signed percent ticks without scientific notation near zero."""
+    if math.isclose(value, 0.0, abs_tol=1e-12):
+        return "0"
+    abs_value = abs(value)
+    sign = "-" if value < 0 else ""
+    if abs_value < 1000:
+        return f"{sign}{abs_value:g}"
+    exponent = int(round(math.log10(abs_value)))
+    if math.isclose(abs_value, 10 ** exponent, rel_tol=1e-8):
+        return rf"${sign}10^{{{exponent}}}$"
+    return f"{sign}{abs_value:g}"
+
+
+def _log_minor_tick_label(value: float, _pos: int) -> str:
+    """Label only selected minor ticks inside each log decade."""
+    if value <= 0 or not np.isfinite(value):
+        return ""
+    exponent = math.floor(math.log10(value))
+    mantissa = value / (10 ** exponent)
+    for reference in (2.0, 3.0, 5.0, 8.0):
+        if math.isclose(mantissa, reference, rel_tol=1e-4):
+            return rf"${int(reference)}{{\times}}10^{{{exponent}}}$"
+    return ""
+
+
+def _expand_log_axis_limits(ax: plt.Axes, axis: str) -> None:
+    """Expand narrow log axes to nearby readable reference ticks."""
+    get_limits = ax.get_xlim if axis == "x" else ax.get_ylim
+    set_limits = ax.set_xlim if axis == "x" else ax.set_ylim
+    low, high = get_limits()
+    if low <= 0 or high <= 0 or not np.isfinite(low) or not np.isfinite(high):
+        return
+    if high < low:
+        low, high = high, low
+        inverted = True
+    else:
+        inverted = False
+
+    lower = _log_reference_floor(low)
+    upper = _log_reference_ceil(high)
+    if inverted:
+        set_limits(upper, lower)
+    else:
+        set_limits(lower, upper)
+
+
+def _log_reference_floor(value: float) -> float:
+    exponent = math.floor(math.log10(value))
+    scaled = value / (10 ** exponent)
+    for reference in (10.0, 8.0, 5.0, 2.0, 1.0):
+        if scaled >= reference:
+            return reference * (10 ** exponent)
+    return 10 ** (exponent - 1)
+
+
+def _log_reference_ceil(value: float) -> float:
+    exponent = math.floor(math.log10(value))
+    scaled = value / (10 ** exponent)
+    for reference in (1.0, 2.0, 5.0, 8.0, 10.0):
+        if scaled <= reference:
+            return reference * (10 ** exponent)
+    return 10 ** (exponent + 1)
+
+
+def style_plot_legend(ax: plt.Axes, outside: bool = False):
+    """Apply a consistent legend style for optimizer comparison plots."""
+    if outside:
+        return ax.legend(
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            frameon=True,
+            framealpha=0.94,
+            borderaxespad=0.0,
+        )
+    return ax.legend(loc="best", frameon=True, framealpha=0.9)
+
+
+def padded_axis_limits(values: np.ndarray, scale: str, pad_fraction: float = 0.025) -> Tuple[float, float]:
+    """Return lightly padded min/max limits for linear or log axes."""
+    values = values[np.isfinite(values)]
+    if scale == "log":
+        values = values[values > 0]
+    if values.size == 0:
+        return (0.0, 1.0)
+    low = float(np.nanmin(values))
+    high = float(np.nanmax(values))
+    if low == high:
+        pad = abs(low) * pad_fraction if low != 0 else pad_fraction
+        return low - pad, high + pad
+    if scale == "log":
+        log_low = math.log10(low)
+        log_high = math.log10(high)
+        pad = max((log_high - log_low) * pad_fraction, 1e-3)
+        return 10 ** (log_low - pad), 10 ** (log_high + pad)
+    pad = (high - low) * pad_fraction
+    return low - pad, high + pad
+
+
+def log_reference_axis_limits(values: np.ndarray, pad_fraction: float = 0.025) -> Tuple[float, float]:
+    """Return log limits snapped to nearby reference ticks for readable axes."""
+    values = values[np.isfinite(values) & (values > 0)]
+    if values.size == 0:
+        return (1e-3, 1e-2)
+    low = _log_reference_floor(float(np.nanmin(values)))
+    high = _log_reference_ceil(float(np.nanmax(values)))
+    log_low = math.log10(low)
+    log_high = math.log10(high)
+    pad = max((log_high - log_low) * pad_fraction, 1e-3)
+    return 10 ** (log_low - pad), 10 ** (log_high + pad)
+
+
+def robust_log_axis_limits(values: Sequence[float], pad_fraction: float = 0.04) -> Tuple[float, float]:
+    """Return stable log limits that ignore tiny tails and rare spikes."""
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite) & (finite > 0)]
+    if finite.size == 0:
+        return (1e-14, 1.0)
+    if finite.size < 20:
+        return log_reference_axis_limits(finite, pad_fraction=pad_fraction)
+
+    log_values = np.log10(finite)
+    low = 10 ** float(np.nanpercentile(log_values, 1.0))
+    high = 10 ** float(np.nanpercentile(log_values, 99.5))
+    if not np.isfinite(low) or not np.isfinite(high) or low >= high:
+        low = float(np.nanmin(finite))
+        high = float(np.nanmax(finite))
+    return log_reference_axis_limits(np.asarray([low, high]), pad_fraction=pad_fraction)
 
 
 def history_marker_positions(values: Sequence[float]) -> List[int]:
@@ -140,26 +372,24 @@ def plot_history_learning_curve(
     series_by_label = hist.prepare_learning_curve_data(runs, stage, error_metric)
     y_label = hist.display_metric_name(stage, error_metric)
     metric_name = hist.filename_metric_name(stage, error_metric)
+    effective_yscale = "linear" if stage == "training" else yscale
 
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
     for i, (label, series) in enumerate(series_by_label.items()):
         x = series.step if resource == "step" else series.relative_time_sec
-        style = history_line_style(i)
-        if stage == "training":
-            style.pop("marker", None)
-            style.pop("markersize", None)
-            style.pop("markerfacecolor", None)
-            style.pop("markeredgecolor", None)
-            style.pop("markeredgewidth", None)
+        style = history_line_style(label, i)
+        style["markevery"] = history_marker_positions(series.value)
         ax.plot(x, series.value, label=label, **style)
 
-    ax.set_xlabel(resource_axis_name(resource))
-    ax.set_ylabel(y_label)
+    ax.set_xlabel(axis_label_text(resource_axis_name(resource)))
+    ax.set_ylabel(axis_label_text(y_label))
     ax.set_title(title_case(f"{y_label} vs. {resource_axis_name(resource)}"))
-    ax.set_yscale(yscale)
-    ax.grid(True, axis="y", alpha=0.3)
-    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True, framealpha=0.92)
-    fig.tight_layout(rect=(0, 0, 0.82, 1))
+    ax.set_yscale(effective_yscale)
+    if effective_yscale == "log":
+        apply_log_axis_style(ax, "y")
+    ax.grid(True, axis="y", which="major", alpha=0.3)
+    style_plot_legend(ax)
+    fig.tight_layout(rect=(0, 0, 1, 1))
 
     output = outdir / f"learning_curve_{stage}_{resource}_{metric_name}.png"
     save_figure(fig, output)
@@ -178,23 +408,40 @@ def plot_history_hitting_curve(
     y_label = "first hitting step" if resource == "step" else "first hitting time (s)"
     metric_label = hist.display_metric_name(stage, error_metric)
     metric_name = hist.filename_metric_name(stage, error_metric)
+    effective_threshold_xscale = "linear" if stage == "training" else threshold_xscale
 
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    threshold_arrays = []
     for i, (label, (thresholds, hits)) in enumerate(curves.items()):
-        style = history_line_style(i)
+        threshold_arrays.append(np.asarray(thresholds, dtype=float))
+        style = history_line_style(label, i)
         style["markevery"] = history_marker_positions(hits)
         ax.plot(thresholds, hits, label=label, **style)
 
-    ax.set_xlabel(f"target {metric_label} threshold")
-    ax.set_ylabel(y_label)
+    ax.set_xlabel(axis_label_text(f"target {metric_label} threshold"))
+    ax.set_ylabel(axis_label_text(y_label))
     ax.set_title(title_case(f"first hitting {resource} vs. target {metric_label}"))
-    ax.set_xscale(threshold_xscale)
-    ax.grid(True, axis="y", alpha=0.3)
-    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=True, framealpha=0.92)
+    ax.set_xscale(effective_threshold_xscale)
+    if effective_threshold_xscale == "log":
+        apply_log_axis_style(ax, "x")
+    ax.grid(True, axis="y", which="major", alpha=0.3)
+    style_plot_legend(ax)
     # Thresholds are generated from loose to strict.  Inverting the x-axis makes
     # the plot read naturally: moving right asks for a stricter/lower error.
-    ax.invert_xaxis()
-    fig.tight_layout()
+    if threshold_arrays:
+        all_thresholds = np.concatenate(threshold_arrays)
+        all_thresholds = all_thresholds[np.isfinite(all_thresholds)]
+        if effective_threshold_xscale == "log":
+            all_thresholds = all_thresholds[all_thresholds > 0]
+        if all_thresholds.size:
+            if effective_threshold_xscale == "log":
+                low, high = log_reference_axis_limits(all_thresholds)
+            else:
+                low, high = padded_axis_limits(all_thresholds, effective_threshold_xscale)
+            ax.set_xlim(high, low)
+    else:
+        ax.invert_xaxis()
+    fig.tight_layout(rect=(0, 0, 1, 1))
 
     output = outdir / f"hitting_curve_{stage}_{resource}_{metric_name}.png"
     save_figure(fig, output)
@@ -215,7 +462,7 @@ def plot_forecast_error_curve(
     display_column = display_metric_text(column)
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
 
-    for run in rollout_runs:
+    for i, run in enumerate(rollout_runs):
         if column not in run.per_step.columns:
             raise KeyError(f"{column} not found in {run.rollout_dir / 'per_step_metrics.csv'}")
         grouped = run.per_step.groupby("step")[column]
@@ -223,17 +470,20 @@ def plot_forecast_error_curve(
         std = grouped.std().fillna(0.0)
         steps = mean.index.to_numpy(dtype=float)
         values = mean.to_numpy(dtype=float)
-        ax.plot(steps, values, marker="o", markersize=3, linewidth=1.8, label=run.label)
+        style = optimizer_line_style(run.label, index=i, include_marker=True)
+        ax.plot(steps, values, label=run.label, **style)
         if len(rollout_runs) <= 6 and std.max() > 0:
             ax.fill_between(steps, values - std.to_numpy(), values + std.to_numpy(), alpha=0.12)
 
-    ax.set_xlabel("autoregressive rollout step")
-    ax.set_ylabel(display_column)
+    ax.set_xlabel("Autoregressive Rollout Step")
+    ax.set_ylabel(axis_label_text(display_column))
     ax.set_title(title_case(f"forecast {display_column} over rollout"))
     ax.set_yscale(yscale)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
+    if yscale == "log":
+        apply_log_axis_style(ax, "y")
+    ax.grid(True, which="major", alpha=0.3)
+    style_plot_legend(ax)
+    fig.tight_layout(rect=(0, 0, 1, 1))
     save_figure(fig, outdir / f"forecast_error_curve_{error_metric}.png")
 
 
@@ -241,6 +491,11 @@ def _bar_colors(n: int):
     """Return a visually distinct but restrained color list for bar charts."""
     cmap = plt.get_cmap("tab20" if n > 10 else "tab10")
     return [cmap(i % cmap.N) for i in range(n)]
+
+
+def optimizer_bar_colors(labels: Sequence[str]) -> List[object]:
+    """Return bar colors that match the optimizer line-color convention."""
+    return [optimizer_line_style(label, index=i, include_marker=False)["color"] for i, label in enumerate(labels)]
 
 
 def _style_bar_axes(ax: plt.Axes) -> None:
@@ -281,8 +536,8 @@ def plot_forecast_accuracy_bar(rollout_runs: Sequence[roll.RolloutRun], error_me
     values = np.array([run.metrics.get(column, np.nan) for run in rollout_runs], dtype=float)
 
     fig, ax = plt.subplots(figsize=(max(8.5, 1.25 * len(labels)), 5.4))
-    bars = ax.bar(labels, values, color=_bar_colors(len(labels)), edgecolor="black", linewidth=0.7, alpha=0.88)
-    ax.set_ylabel(f"{display_column} (lower is better)")
+    bars = ax.bar(labels, values, color=optimizer_bar_colors(labels), edgecolor="black", linewidth=0.7, alpha=0.88)
+    ax.set_ylabel(title_case(f"{display_column} (lower is better)"))
     ax.set_title(title_case(f"aggregate forecast accuracy: {display_column}"), fontweight="bold")
     _style_bar_axes(ax)
     _annotate_bars(ax, bars)
@@ -306,9 +561,9 @@ def plot_forecast_runtime_ratio_bar(rollout_runs: Sequence[roll.RolloutRun], out
     )
 
     fig, ax = plt.subplots(figsize=(max(8.5, 1.25 * len(labels)), 5.4))
-    bars = ax.bar(labels, values, color=_bar_colors(len(labels)), edgecolor="black", linewidth=0.7, alpha=0.88)
+    bars = ax.bar(labels, values, color=optimizer_bar_colors(labels), edgecolor="black", linewidth=0.7, alpha=0.88)
     ax.axhline(1.0, color="0.25", linestyle="--", linewidth=1.2, alpha=0.8, label="equal runtime")
-    ax.set_ylabel("Runtime ratio")
+    ax.set_ylabel("Runtime Ratio")
     ax.set_title("Forecast Rollout Runtime vs. Non-ML Solver (Lower Is Better)", fontweight="bold")
     _style_bar_axes(ax)
     finite_heights = [bar.get_height() for bar in bars if np.isfinite(bar.get_height())]
@@ -558,21 +813,14 @@ def plot_combined_spectra(
     """
     truth_spectra, pred_spectra = _comparison_spectra(snapshots, spectra_method, sht)
 
-    titles = [
-        "Rotational Kinetic Energy",
-        "Divergent Kinetic Energy",
-        "Potential Energy",
-        "Total Energy",
-    ]
+    titles = ["Rotational", "Divergent", "Potential", "Total"]
     keys = ["rotational", "divergent", "potential", "total"]
-    linestyles = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2))]
-    colors = _bar_colors(max(1, len(pred_spectra)))
 
     fig, axes = plt.subplots(2, 2, figsize=(13.0, 9.6))
     legend_handles = []
     legend_labels = []
 
-    for ax, title, key in zip(axes.ravel(), titles, keys):
+    for idx, (ax, title, key) in enumerate(zip(axes.ravel(), titles, keys)):
         k = truth_spectra["wavenumbers"][1:]
         truth_values = truth_spectra[key][1:]
         truth_line, = ax.loglog(
@@ -590,16 +838,12 @@ def plot_combined_spectra(
 
         for i, (label, spectra) in enumerate(pred_spectra):
             k_pred = spectra["wavenumbers"][1:]
+            style = optimizer_line_style(label, index=i, include_marker=len(k_pred) < 40)
             line, = ax.loglog(
                 k_pred,
                 spectra[key][1:],
-                color=colors[i % len(colors)],
-                linestyle=linestyles[i % len(linestyles)],
-                linewidth=1.9,
-                marker="o" if len(k_pred) < 40 else None,
-                markersize=3,
-                alpha=0.92,
                 label=label,
+                **style,
             )
             if ax is axes.ravel()[0]:
                 legend_handles.append(line)
@@ -622,8 +866,10 @@ def plot_combined_spectra(
                 legend_labels.extend([r"Scaled $k^{-3}$", r"Scaled $k^{-5/3}$"])
 
         ax.set_title(title, fontweight="bold")
-        ax.set_xlabel("Wavenumber $l$")
-        ax.set_ylabel("Power spectrum")
+        if idx // 2 == 1:
+            ax.set_xlabel("Wavenumber $l$")
+        if idx % 2 == 0:
+            ax.set_ylabel("Power Spectrum")
         ax.grid(True, which="both", alpha=0.3)
         if len(k) > 0:
             ax.set_xlim(left=max(1, k[0]), right=k[-1])
@@ -648,38 +894,33 @@ def plot_combined_spectra_percent_difference(
     """Plot signed spectral percent difference from ground truth in a 2x2 grid."""
     truth_spectra, pred_spectra = _comparison_spectra(snapshots, spectra_method, sht)
 
-    titles = [
-        "Rotational Kinetic Energy",
-        "Divergent Kinetic Energy",
-        "Potential Energy",
-        "Total Energy",
-    ]
+    titles = ["Rotational", "Divergent", "Potential", "Total"]
     keys = ["rotational", "divergent", "potential", "total"]
-    linestyles = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2))]
-    colors = _bar_colors(max(1, len(pred_spectra)))
+    percent_by_key = {}
+    all_percent_values = []
+    for key in keys:
+        truth_values = np.asarray(truth_spectra[key])[1:]
+        entries = []
+        for label, spectra in pred_spectra:
+            diff = _signed_percent_difference(np.asarray(spectra[key])[1:], truth_values)
+            entries.append((label, np.asarray(spectra["wavenumbers"])[1:], diff))
+            all_percent_values.append(diff)
+        percent_by_key[key] = entries
+    y_limit = _spectral_percent_axis_limit(all_percent_values)
 
     fig, axes = plt.subplots(2, 2, figsize=(13.0, 9.6))
     legend_handles = []
     legend_labels = []
 
-    for ax, title, key in zip(axes.ravel(), titles, keys):
+    for idx, (ax, title, key) in enumerate(zip(axes.ravel(), titles, keys)):
         k = np.asarray(truth_spectra["wavenumbers"])[1:]
-        truth_values = np.asarray(truth_spectra[key])[1:]
-        percent_values = []
-        for i, (label, spectra) in enumerate(pred_spectra):
-            k_pred = np.asarray(spectra["wavenumbers"])[1:]
-            diff = _signed_percent_difference(np.asarray(spectra[key])[1:], truth_values)
-            percent_values.append(diff)
+        for i, (label, k_pred, diff) in enumerate(percent_by_key[key]):
+            style = optimizer_line_style(label, index=i, include_marker=len(k_pred) < 40)
             line, = ax.semilogx(
                 k_pred,
                 diff,
-                color=colors[i % len(colors)],
-                linestyle=linestyles[i % len(linestyles)],
-                linewidth=1.9,
-                marker="o" if len(k_pred) < 40 else None,
-                markersize=3,
-                alpha=0.92,
                 label=label,
+                **style,
             )
             if ax is axes.ravel()[0]:
                 legend_handles.append(line)
@@ -687,11 +928,11 @@ def plot_combined_spectra_percent_difference(
 
         ax.axhline(0.0, color="0.25", linewidth=1.1, alpha=0.75)
         ax.set_title(title, fontweight="bold")
-        ax.set_xlabel("Wavenumber $l$")
-        ax.set_ylabel("Signed difference from ground truth (%)")
-        y_limit = _spectral_percent_axis_limit(percent_values)
-        ax.set_yscale("symlog", linthresh=10.0)
-        ax.set_ylim(-y_limit, y_limit)
+        if idx // 2 == 1:
+            ax.set_xlabel("Wavenumber $l$")
+        if idx % 2 == 0:
+            ax.set_ylabel("Difference from Ground Truth (%)")
+        apply_percent_difference_y_axis(ax, y_limit, linthresh=10.0)
         ax.grid(True, which="both", alpha=0.3)
         if len(k) > 0:
             ax.set_xlim(left=max(1, k[0]), right=k[-1])
@@ -925,6 +1166,102 @@ def make_rollout_animation(
     plt.close(fig)
 
 
+def make_rollout_error_animation(
+    frames: Sequence[Sequence[roll.FieldSnapshot]],
+    channel: str,
+    fps: int = 8,
+    output: Optional[Union[str, Path]] = None,
+) -> None:
+    """Create an error-only animation for a selected optimizer group.
+
+    The layout wraps optimizer panels into a compact grid and keeps one shared
+    signed-error color scale across all frames, making it suitable for focused
+    slide exports where the value fields are shown in a separate GIF.
+    """
+    if not frames:
+        raise ValueError("frames is empty - nothing to animate.")
+
+    ch = roll.CHANNEL_TO_INDEX[channel]
+    labels = [snap.label for snap in frames[0]]
+    n_opts = len(labels)
+    n_cols = min(3, max(1, int(math.ceil(math.sqrt(n_opts)))))
+    n_rows = int(math.ceil(n_opts / n_cols))
+
+    all_errors = np.concatenate([
+        (snap.prediction_fields[ch] - snap.truth_fields[ch]).ravel()
+        for step_snaps in frames
+        for snap in step_snaps
+    ])
+    err_abs_max = float(max(
+        abs(np.nanpercentile(all_errors, 2)),
+        abs(np.nanpercentile(all_errors, 98)),
+    ))
+    if not np.isfinite(err_abs_max) or err_abs_max <= 0:
+        err_abs_max = 1.0
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(4.2 * n_cols, 3.7 * n_rows + 0.9),
+        squeeze=False,
+    )
+    fig.patch.set_facecolor("#0d1117")
+
+    im_errors = []
+    for ax, label, snap in zip(axes.ravel(), labels, frames[0]):
+        im = ax.imshow(
+            np.zeros_like(snap.prediction_fields[ch]),
+            cmap="RdBu_r",
+            vmin=-err_abs_max,
+            vmax=err_abs_max,
+            origin="upper",
+            aspect="auto",
+        )
+        ax.set_title(label, color="white", fontsize=11, fontweight="bold", pad=6)
+        ax.axis("off")
+        ax.set_facecolor("#0d1117")
+        _dark_colorbar(fig, im, ax)
+        im_errors.append(im)
+
+    for ax in axes.ravel()[n_opts:]:
+        ax.axis("off")
+        ax.set_facecolor("#0d1117")
+
+    fig.suptitle(
+        f"Rollout Error: {display_metric_text(channel)}",
+        color="white",
+        fontsize=15,
+        fontweight="bold",
+    )
+    step_label = fig.text(
+        0.5,
+        0.945,
+        "",
+        ha="center",
+        va="top",
+        color="white",
+        fontsize=12,
+        fontweight="bold",
+    )
+    fig.tight_layout(rect=[0, 0.0, 1, 0.91])
+
+    def update(frame_index: int):
+        step_snaps = frames[frame_index]
+        step_label.set_text(f"Rollout Step {step_snaps[0].step}")
+        for im, snap in zip(im_errors, step_snaps):
+            im.set_data(snap.prediction_fields[ch] - snap.truth_fields[ch])
+        return [*im_errors, step_label]
+
+    ani = manimation.FuncAnimation(
+        fig,
+        update,
+        frames=len(frames),
+        interval=1000 / fps,
+        blit=False,
+    )
+    _save_or_show_animation(fig, ani, output, fps=fps, dpi=120)
+
+
 def make_spectral_image_animation(
     frames: Sequence[Tuple[int, Sequence[Tuple[str, Path]]]],
     fps: int = 8,
@@ -996,11 +1333,11 @@ def make_combined_spectral_animation(
     # fail clearly so the plotted spectra are not mistaken for forecast.py output.
     sht = roll.build_spherical_sht(config_path, frames[0][0].truth_fields.shape)
     spectral_frames = []
-    y_values = []
+    y_values_by_key = {key: [] for key in ("rotational", "divergent", "potential", "total")}
     for step_snaps in frames:
-        # Precompute spectra and global positive y-limits before constructing
-        # the animation.  Fixed log-scale limits keep optimizer differences from
-        # being hidden by per-frame autoscaling.
+        # Precompute spectra and fixed per-channel y-limits before constructing
+        # the animation.  Per-channel limits keep each panel readable without
+        # per-frame autoscaling jitter.
         truth_spectra = roll.compute_spherical_energy_spectra(step_snaps[0].truth_fields, sht)
         pred_spectra = [
             (snap.label, roll.compute_spherical_energy_spectra(snap.prediction_fields, sht))
@@ -1010,7 +1347,7 @@ def make_combined_spectral_animation(
         for spectra in [truth_spectra, *[spec for _, spec in pred_spectra]]:
             for key in ("rotational", "divergent", "potential", "total"):
                 values = np.asarray(spectra[key])
-                y_values.extend(values[np.isfinite(values) & (values > 0)].tolist())
+                y_values_by_key[key].extend(values[np.isfinite(values) & (values > 0)].tolist())
 
     spec_keys = [
         ("rotational", "Rotational"),
@@ -1019,25 +1356,29 @@ def make_combined_spectral_animation(
         ("total", "Total"),
     ]
     labels = [snap.label for snap in frames[0]]
-    colors = _bar_colors(max(1, len(labels)))
-    y_min = max(min(y_values) * 0.6, 1e-14) if y_values else 1e-14
-    y_max = max(y_values) * 1.6 if y_values else 1.0
+    y_limits_by_key = {
+        key: robust_log_axis_limits(y_values_by_key[key])
+        for key, _ in spec_keys
+    }
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     fig.suptitle("Combined Rollout Spectra Comparison", fontsize=15, fontweight="bold")
     step_label = fig.text(0.5, 0.935, "", ha="center", va="top", fontsize=11, fontweight="bold")
 
     line_sets = []
-    for ax, (key, title) in zip(axes.ravel(), spec_keys):
+    for idx, (ax, (key, title)) in enumerate(zip(axes.ravel(), spec_keys)):
         truth_line, = ax.loglog([], [], color="black", linewidth=2.2, linestyle="--", label="Ground Truth")
         pred_lines = []
         for i, label in enumerate(labels):
-            line, = ax.loglog([], [], color=colors[i % len(colors)], linewidth=1.8, label=label)
+            style = optimizer_line_style(label, index=i, include_marker=False)
+            line, = ax.loglog([], [], label=label, **style)
             pred_lines.append((label, line))
         ax.set_title(title, fontweight="bold")
-        ax.set_xlabel("Wavenumber $l$")
-        ax.set_ylabel("Power spectrum")
-        ax.set_ylim(y_min, y_max)
+        if idx // 2 == 1:
+            ax.set_xlabel("Wavenumber $l$")
+        if idx % 2 == 0:
+            ax.set_ylabel("Power Spectrum")
+        ax.set_ylim(*y_limits_by_key[key])
         ax.grid(True, which="both", alpha=0.3)
         line_sets.append((key, truth_line, pred_lines))
 
@@ -1109,7 +1450,6 @@ def make_combined_spectral_percent_difference_animation(
         ("total", "Total"),
     ]
     labels = [snap.label for snap in frames[0]]
-    colors = _bar_colors(max(1, len(labels)))
     y_limit = _spectral_percent_axis_limit(percent_values)
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
@@ -1117,17 +1457,19 @@ def make_combined_spectral_percent_difference_animation(
     step_label = fig.text(0.5, 0.935, "", ha="center", va="top", fontsize=11, fontweight="bold")
 
     line_sets = []
-    for ax, (key, title) in zip(axes.ravel(), spec_keys):
+    for idx, (ax, (key, title)) in enumerate(zip(axes.ravel(), spec_keys)):
         pred_lines = []
         for i, label in enumerate(labels):
-            line, = ax.semilogx([], [], color=colors[i % len(colors)], linewidth=1.8, label=label)
+            style = optimizer_line_style(label, index=i, include_marker=False)
+            line, = ax.semilogx([], [], label=label, **style)
             pred_lines.append((label, line))
         ax.axhline(0.0, color="0.25", linewidth=1.1, alpha=0.75)
         ax.set_title(title, fontweight="bold")
-        ax.set_xlabel("Wavenumber $l$")
-        ax.set_ylabel("Signed difference from ground truth (%)")
-        ax.set_yscale("symlog", linthresh=10.0)
-        ax.set_ylim(-y_limit, y_limit)
+        if idx // 2 == 1:
+            ax.set_xlabel("Wavenumber $l$")
+        if idx % 2 == 0:
+            ax.set_ylabel("Difference from Ground Truth (%)")
+        apply_percent_difference_y_axis(ax, y_limit, linthresh=10.0)
         ax.grid(True, which="both", alpha=0.3)
         line_sets.append((key, pred_lines))
 

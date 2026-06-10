@@ -16,6 +16,20 @@ autoreg_steps="${AUTOREG_STEPS:-100}"
 output_freq="${OUTPUT_FREQ:-5}"
 nlat="${VIS_NLAT:-128}"
 nlon="${VIS_NLON:-256}"
+animation_pacing="${ANIMATION_PACING:-standard}"
+
+# Optional focused animation export.  The normal history/forecast comparison
+# folders remain unchanged; this creates an extra folder containing only the
+# selected optimizer subset for slide-friendly inspection.  Edit the optimizer
+# and label arrays below to focus on a different subset.
+enable_focused_animations="${ENABLE_FOCUSED_ANIMATIONS:-true}"
+focused_animation_group_name="${FOCUSED_ANIMATION_GROUP_NAME:-focused_mud_muon}"
+read -r -a focused_animation_optimizers <<< "${FOCUSED_ANIMATION_OPTIMIZERS:-mud muon}"
+read -r -a focused_animation_labels <<< "${FOCUSED_ANIMATION_LABELS:-MUD Muon}"
+
+# Optional suffix for exported animation files.  The cluster wrapper sets this
+# to values such as "_v3" so copied GIFs still identify their source version.
+animation_file_suffix="${VIS_EXPORT_SUFFIX:-}"
 
 # Rollout tensors are much larger than the final figures.  Keep this true for
 # cluster runs when the saved .pt rollout files are only an intermediate product
@@ -55,6 +69,37 @@ validate_group() {
     echo "Error: ${group_name} optimizers and labels must have the same length." >&2
     exit 1
   fi
+}
+
+animation_fps_for_pacing() {
+  local frame_count=$(( (autoreg_steps + output_freq - 1) / output_freq + 1 ))
+  local fps
+
+  case "${animation_pacing}" in
+    standard)
+      fps=8
+      ;;
+    smooth)
+      # Smooth playback is most effective when output_freq is small enough to
+      # save dense rollout frames.  This mode plays those frames a bit faster.
+      fps=12
+      ;;
+    slow)
+      # Aim for a presentation-friendly 12-second playback duration.  Clamp the
+      # result so short rollouts do not become painfully slow.
+      fps=$(( (frame_count + 11) / 12 ))
+      if (( fps < 2 )); then
+        fps=2
+      elif (( fps > 6 )); then
+        fps=6
+      fi
+      ;;
+    *)
+      echo "Error: animation_pacing must be standard, smooth, or slow; got '${animation_pacing}'." >&2
+      exit 1
+      ;;
+  esac
+  printf '%s\n' "${fps}"
 }
 
 build_runs() {
@@ -128,13 +173,44 @@ run_forecast_group() {
   "${forecast_cmd[@]}"
 
   echo "=== Animating ${group_name} forecast comparison ==="
+  local animation_fps
+  animation_fps="$(animation_fps_for_pacing)"
+  echo "Animation pacing: ${animation_pacing} (${animation_fps} fps)"
   python -m visualize animate \
     --rollout_dir "${rollout_dir}" \
     --labels "${labels_ref[@]}" \
     --channel "${channel}" \
+    --fps "${animation_fps}" \
     --show_error \
     --output "${forecast_dir}/rollout_fields.gif" \
     --spectral_output "${forecast_dir}/rollout_spectra.gif"
+}
+
+run_focused_animation_group() {
+  local group_name="$1"
+  local animation_dir="$2"
+  local rollout_dir="$3"
+  local -n optimizers_ref="$4"
+  local -n labels_ref="$5"
+
+  mkdir -p "${animation_dir}"
+  echo "=== Rendering focused animation group: ${group_name} ==="
+  echo "Animations: ${animation_dir}"
+
+  local file_prefix="${group_name}_rollout"
+  local animation_fps
+  animation_fps="$(animation_fps_for_pacing)"
+  echo "Animation pacing: ${animation_pacing} (${animation_fps} fps)"
+  python -m visualize animate \
+    --rollout_dir "${rollout_dir}" \
+    --labels "${labels_ref[@]}" \
+    --rollout_names "${optimizers_ref[@]}" \
+    --channel "${channel}" \
+    --fps "${animation_fps}" \
+    --output "${animation_dir}/${file_prefix}_fields${animation_file_suffix}.gif" \
+    --with_error_output "${animation_dir}/${file_prefix}_fields_with_error${animation_file_suffix}.gif" \
+    --error_output "${animation_dir}/${file_prefix}_error${animation_file_suffix}.gif" \
+    --spectral_output "${animation_dir}/${file_prefix}_spectra${animation_file_suffix}.gif"
 }
 
 # ---------------------------------------------------------------------------
@@ -147,6 +223,7 @@ run_forecast_group() {
 history_root="${FIGURES_HISTORY_ROOT:-./figures_history}"
 forecast_root="${FIGURES_FORECAST_ROOT:-./figures_forecast}"
 rollout_root="${ROLLOUT_ROOT:-./rollout_results}"
+focused_animation_root="${FOCUSED_ANIMATION_ROOT:-./focused_animations}"
 
 all_history_dir="${history_root}/all_optimizers"
 all_forecast_dir="${forecast_root}/all_optimizers"
@@ -202,6 +279,10 @@ else
   build_runs without_sgd_optimizers without_sgd_runs
 fi
 
+if [[ "${enable_focused_animations}" == "true" ]]; then
+  validate_group "focused animations" focused_animation_optimizers focused_animation_labels
+fi
+
 # History plots are cheaper than rollouts and do not depend on forecast output.
 # Run every selected history comparison first so Gauss-Newton folders/messages
 # are produced even if a later checkpoint lookup or rollout job fails.
@@ -225,6 +306,15 @@ if [[ "${include_gauss_newton}" == "true" ]]; then
 else
   run_forecast_group "all optimizers" "${all_forecast_dir}" "${shared_rollout_dir}" false all_without_gauss_runs all_without_gauss_labels
   run_forecast_group "optimizers excluding SGD" "${without_sgd_forecast_dir}" "${shared_rollout_dir}" true without_sgd_runs without_sgd_labels
+fi
+
+if [[ "${enable_focused_animations}" == "true" ]]; then
+  run_focused_animation_group \
+    "${focused_animation_group_name}" \
+    "${focused_animation_root}/${focused_animation_group_name}" \
+    "${shared_rollout_dir}" \
+    focused_animation_optimizers \
+    focused_animation_labels
 fi
 
 if [[ "${delete_rollouts_after_plotting}" == "true" ]]; then

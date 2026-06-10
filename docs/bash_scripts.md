@@ -76,11 +76,15 @@ Important settings:
 |---|---:|---|
 | `include_gauss_newton` | `true` | Controls whether Gauss-Newton is included and which comparison groups are generated. |
 | `channel` | `vorticity` | Field channel used for forecast grids and animations. |
-| `history_scale` | `log` | Scale used by history plots. Learning curves use it on the metric y-axis; hitting curves use it on the threshold x-axis. |
+| `history_scale` | `log` | Scale used by validation history plots. Learning curves use it on the metric y-axis; hitting curves use it on the threshold x-axis. Training plots stay linear. |
 | `forecast_error_scale` | `log` | Y-axis scale for forecast L2 error curves. |
 | `autoreg_steps` | `100` | Number of autoregressive forecast steps. |
 | `output_freq` | `5` | Saves rollout tensors/plots every N forecast steps. |
+| `animation_pacing` | `standard` | Animation playback mode: `standard`, `smooth`, or `slow`. |
 | `delete_rollouts_after_plotting` | `true` | Deletes `./rollout_results` after figures and animations are complete. |
+| `enable_focused_animations` | `true` | Creates an extra focused animation folder from the selected optimizer subset. |
+| `focused_animation_optimizers` | `mud muon` | Direct-script focused subset. Allowed IDs: `adam`, `adamw`, `gauss_newton`, `mud`, `muon`, `sgd`. |
+| `animation_file_suffix` | empty | Optional export suffix, such as `_v3`. The cluster wrapper sets this automatically. |
 
 The script asks:
 
@@ -147,6 +151,49 @@ figures for each comparison scope. If
 `delete_rollouts_after_plotting=true`, `./rollout_results` is removed at the
 end to save storage.
 
+`animation_pacing` controls GIF playback speed, not the number of saved rollout
+frames:
+
+| Mode | Behavior | Best use |
+|---|---|---|
+| `standard` | Uses 8 fps. | Default viewing and quick comparison. |
+| `smooth` | Uses 12 fps. | Dense animations when `output_freq` is small. |
+| `slow` | Chooses fps from `autoreg_steps/output_freq` for about 12 seconds of playback, clamped to 2-6 fps. | Audience-facing slides where the rollout should evolve slowly. |
+
+For genuinely smoother temporal motion, lower `output_freq` so the forecast
+saves more intermediate frames; `animation_pacing` only controls playback speed.
+
+The combined spectral PNGs and default spectral GIFs use the spherical-harmonic
+diagnostic for real rollouts. The signed percentage spectral PNG/GIF uses the
+same spectra, with a logarithmic wavenumber axis and a signed symmetric-log
+percentage axis so all channels use one consistent y-scale behavior.
+
+When `enable_focused_animations=true`, the script also reuses the shared
+rollouts to create a slide-friendly focused animation folder:
+
+```text
+focused_animations/focused_mud_muon/
+  focused_mud_muon_rollout_fields.gif
+  focused_mud_muon_rollout_fields_with_error.gif
+  focused_mud_muon_rollout_error.gif
+  focused_mud_muon_rollout_spectra.gif
+  focused_mud_muon_rollout_spectra_percent_difference.gif
+```
+
+The direct script's default focused subset is MUD and Muon. The cluster wrapper
+currently overrides that subset to Adam and AdamW. To change the cluster-wrapper
+focused subset, edit `focused_animation_optimizers` in
+`run_cluster_visualization.sh`:
+
+```bash
+focused_animation_optimizers=(adamw muon)
+```
+
+Use optimizer IDs from this set: `adam`, `adamw`, `gauss_newton`, `mud`,
+`muon`, `sgd`. The cluster wrapper derives the folder/file prefix, such as
+`focused_adamw_muon`, and maps display labels internally, such as `AdamW` and
+`Muon`.
+
 ## `run_cluster_visualization.sh`
 
 Non-interactive wrapper for cluster use. It can call the training script, the
@@ -182,6 +229,9 @@ Important settings:
 | `visualization_forecast_error_scale` | `log` | Overrides the forecast error curve scale for this wrapper run. |
 | `visualization_autoreg_steps` | `100` | Overrides the forecast rollout horizon for this wrapper run. |
 | `visualization_output_freq` | `5` | Overrides how often rollout tensors/plots are saved for this wrapper run. |
+| `visualization_animation_pacing` | `slow` | Overrides animation playback mode: `standard`, `smooth`, or `slow`. |
+| `enable_focused_animations` | `true` | Passes focused-animation generation through to `visualize_all_optimizers.sh`. |
+| `focused_animation_optimizers` | `adam adamw` | Focused subset used by the cluster wrapper. Allowed IDs: `adam`, `adamw`, `gauss_newton`, `mud`, `muon`, `sgd`. |
 | `visualization_root` | `./visualization_runs` | Top-level folder for versioned visualization outputs from the wrapper. |
 | `visualization_version` | `auto` | Output version folder. With `auto`, `overwrite_visualization_outputs` controls whether to append a new version or rewrite the latest one. Any other value is used as a folder name under `visualization_root`. |
 
@@ -233,6 +283,7 @@ visualization_runs/
   version_0/
     figures_history/
     figures_forecast/
+    focused_animations/
     rollout_results/
     settings.txt
   version_1/
@@ -242,8 +293,20 @@ visualization_runs/
 `settings.txt` records the wrapper settings used for that version. If
 `delete_rollouts_after_plotting=true` in `visualize_all_optimizers.sh`,
 `rollout_results/` is deleted after figures and animations are generated, but
-the version's `figures_history/`, `figures_forecast/`, and `settings.txt`
-remain.
+the version's `figures_history/`, `figures_forecast/`, `focused_animations/`,
+and `settings.txt` remain.
+
+Focused animation files receive a version suffix automatically when produced by
+the wrapper. For example, outputs under `visualization_runs/version_3/` use
+filenames such as:
+
+```text
+focused_adam_adamw_rollout_fields_v3.gif
+focused_adam_adamw_rollout_fields_with_error_v3.gif
+focused_adam_adamw_rollout_error_v3.gif
+focused_adam_adamw_rollout_spectra_v3.gif
+focused_adam_adamw_rollout_spectra_percent_difference_v3.gif
+```
 
 To rewrite the latest existing auto version instead of creating a new one, set:
 
