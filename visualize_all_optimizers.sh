@@ -204,7 +204,7 @@ run_focused_animation_group() {
   python -m visualize animate \
     --rollout_dir "${rollout_dir}" \
     --labels "${labels_ref[@]}" \
-    --rollout_names "${optimizers_ref[@]}" \
+    --rollout_names "${labels_ref[@]}" \
     --channel "${channel}" \
     --fps "${animation_fps}" \
     --output "${animation_dir}/${file_prefix}_fields${animation_file_suffix}.gif" \
