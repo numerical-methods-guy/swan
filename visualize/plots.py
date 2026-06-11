@@ -22,7 +22,7 @@ matplotlib.use("Agg")
 from visualize import mpl_style  # noqa: F401  # apply M2PI report typography
 import matplotlib.pyplot as plt
 import matplotlib.animation as manimation
-from matplotlib.ticker import FixedLocator, FuncFormatter, LogFormatterMathtext, LogLocator, NullFormatter, ScalarFormatter
+from matplotlib.ticker import FixedLocator, FuncFormatter, LogFormatterMathtext, LogLocator, MaxNLocator, NullFormatter, ScalarFormatter
 
 from visualize import history as hist
 from visualize import rollout as roll
@@ -553,6 +553,72 @@ def plot_forecast_accuracy_bar(
     _annotate_bars(ax, bars)
     fig.tight_layout()
     save_figure(fig, outdir / output_name)
+
+
+def plot_skill_horizon_vs_gamma(
+    rollout_runs: Sequence[roll.RolloutRun],
+    gammas: Optional[Sequence[float]],
+    outdir: Path,
+) -> None:
+    """Plot forecast skill horizon as a function of relative-error threshold."""
+    curves = roll.compute_skill_horizon_curves(rollout_runs, gammas)
+    fig, ax = plt.subplots(figsize=(9.2, 5.8))
+    ax.set_facecolor("#fbfbfd")
+
+    has_uncrossed = False
+    for i, curve in enumerate(curves):
+        style = optimizer_line_style(curve.label, index=i, include_marker=True)
+        style["linewidth"] = max(float(style.get("linewidth", 1.9)), 2.1)
+        style["markersize"] = 4.0
+        style["markevery"] = history_marker_positions(curve.gammas)
+        ax.plot(curve.gammas, curve.horizons, label=curve.label, **style)
+        uncrossed = ~curve.crossed
+        if np.any(uncrossed):
+            has_uncrossed = True
+            marker = style.get("marker", "o")
+            color = style.get("color", "black")
+            ax.scatter(
+                curve.gammas[uncrossed],
+                curve.horizons[uncrossed],
+                marker=marker,
+                facecolors="none",
+                edgecolors=color,
+                linewidths=1.4,
+                s=42,
+                zorder=5,
+            )
+
+    all_gammas = np.concatenate([curve.gammas for curve in curves])
+    all_horizons = np.concatenate([curve.horizons for curve in curves])
+    if all_gammas.size:
+        x_pad = max(0.02, 0.025 * float(np.nanmax(all_gammas) - np.nanmin(all_gammas)))
+        ax.set_xlim(float(np.nanmin(all_gammas)) - x_pad, float(np.nanmax(all_gammas)) + x_pad)
+    if all_horizons.size:
+        y_high = float(np.nanmax(all_horizons))
+        ax.set_ylim(bottom=0.0, top=max(1.0, y_high * 1.06))
+
+    ax.set_xlabel("Allowed relative error threshold γ")
+    ax.set_ylabel("Reliable rollout length before error exceeds threshold [steps]")
+    ax.set_title("Forecast Reliability", fontweight="bold", pad=12)
+    if has_uncrossed:
+        ax.text(
+            0.99,
+            0.02,
+            "open markers: threshold was not crossed within the saved rollout horizon",
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=8.5,
+            color="0.25",
+        )
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.grid(True, axis="y", which="major", alpha=0.28, linewidth=0.8)
+    ax.grid(True, axis="x", which="major", alpha=0.14, linewidth=0.7)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    style_plot_legend(ax, outside=len(curves) > 5)
+    fig.tight_layout(rect=(0, 0, 0.84 if len(curves) > 5 else 1, 1))
+    save_figure(fig, outdir / "skill_horizon_vs_gamma.png")
 
 
 def plot_forecast_runtime_ratio_bar(rollout_runs: Sequence[roll.RolloutRun], outdir: Path) -> None:

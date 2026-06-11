@@ -73,6 +73,7 @@ from visualize.plots import (
     plot_history_hitting_curve,
     plot_forecast_error_curve,
     plot_forecast_accuracy_bar,
+    plot_skill_horizon_vs_gamma,
     plot_forecast_runtime_ratio_bar,
     plot_prediction_grid,
     plot_error_grid,
@@ -189,6 +190,8 @@ def run_forecast(args: argparse.Namespace) -> None:
     plot_forecast_error_curve(rollout_runs, args.error_metric, outdir, yscale=args.forecast_error_scale)
     plot_forecast_accuracy_bar(rollout_runs, args.error_metric, outdir)
     plot_forecast_runtime_ratio_bar(rollout_runs, outdir)
+    if args.skill_horizon:
+        plot_skill_horizon_vs_gamma(rollout_runs, args.skill_horizon_gammas, outdir)
     plot_prediction_grid(snapshots, args.channel, args.grid_cols, args.output_freq, outdir)
     plot_error_grid(snapshots, args.channel, args.error_mode, args.grid_cols, args.output_freq, outdir)
     # The static combined spectra should match forecast.py's spherical-harmonic
@@ -360,6 +363,8 @@ def build_parser() -> argparse.ArgumentParser:
     fc.add_argument("--channel", choices=tuple(roll.CHANNEL_TO_INDEX.keys()), default="vorticity", help="Field channel for spatial plots. Default: vorticity")
     fc.add_argument("--error_metric", choices=tuple(roll.ERROR_METRIC_TO_COLUMN.keys()), default="l2", help="Scalar forecast metric. Default: l2")
     fc.add_argument("--forecast_error_scale", choices=("linear", "log"), default="linear", help="Y-axis scale for forecast_error_curve_<metric>.png. Default: linear")
+    fc.add_argument("--skill_horizon", action="store_true", help="Also plot skill_horizon_vs_gamma.png from saved rollout tensors.")
+    fc.add_argument("--skill_horizon_gammas", nargs="+", type=float, default=None, help="Gamma thresholds for --skill_horizon. Default: 36 values from 0.25 to 2.0")
     fc.add_argument("--error_mode", choices=("signed", "abs", "squared"), default="signed", help="Pointwise error map mode. Default: signed")
     fc.add_argument("--summary_step", default="final", help="Step for final grid/spectra plots: final/latest or an integer. Default: final")
     fc.add_argument("--spherical_method", choices=("spherical", "fft"), default="spherical", help="Method for forecast_spectra_final.png. Default: spherical")

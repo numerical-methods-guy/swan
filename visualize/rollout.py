@@ -104,6 +104,16 @@ class FieldSnapshot:
     truth_fields: np.ndarray       # shape: (3, nlat, nlon)
 
 
+@dataclass
+class SkillHorizonCurve:
+    """Skill horizon curve for one optimizer label."""
+
+    label: str
+    gammas: np.ndarray
+    horizons: np.ndarray
+    crossed: np.ndarray
+
+
 # ---------------------------------------------------------------------------
 # Checkpoint discovery
 # ---------------------------------------------------------------------------
@@ -622,6 +632,131 @@ def load_field_snapshot(rollout_dir: str | Path, label: str, step: int) -> Field
     pred = load_field_pt(sorted(pred_matches)[0])
     truth = load_field_pt(sorted(truth_matches)[0])
     return FieldSnapshot(label=label, step=step, prediction_fields=pred, truth_fields=truth)
+
+
+def compute_skill_horizon_curves(
+    rollout_runs: Sequence[RolloutRun],
+    gammas: Optional[Sequence[float]] = None,
+) -> List[SkillHorizonCurve]:
+    """Compute gamma -> first threshold-crossing rollout step from saved tensors.
+
+    The relative error uses all saved field channels and grid points.  When a
+    rollout directory contains multiple initial conditions, horizons are
+    summarized by the median across those initial conditions.
+    """
+    gamma_values = _validate_skill_gammas(gammas)
+    curves: List[SkillHorizonCurve] = []
+    for run in rollout_runs:
+        per_ic_errors = _relative_rollout_errors_by_ic(run.rollout_dir)
+        if not per_ic_errors:
+            raise FileNotFoundError(f"Could not find prediction/truth .pt files in {run.rollout_dir}")
+
+        horizons_by_ic = []
+        crossed_by_ic = []
+        for step_errors in per_ic_errors.values():
+            steps = np.asarray(sorted(step_errors), dtype=int)
+            errors = np.asarray([step_errors[int(step)] for step in steps], dtype=float)
+            horizons, crossed = _skill_horizon_for_errors(steps, errors, gamma_values)
+            horizons_by_ic.append(horizons)
+            crossed_by_ic.append(crossed)
+
+        horizons_arr = np.vstack(horizons_by_ic)
+        crossed_arr = np.vstack(crossed_by_ic)
+        curves.append(
+            SkillHorizonCurve(
+                label=run.label,
+                gammas=gamma_values,
+                horizons=np.nanmedian(horizons_arr, axis=0),
+                crossed=np.mean(crossed_arr, axis=0) >= 0.5,
+            )
+        )
+    return curves
+
+
+def _validate_skill_gammas(gammas: Optional[Sequence[float]]) -> np.ndarray:
+    """Return sorted positive gamma thresholds."""
+    if gammas is None:
+        values = np.linspace(0.25, 2.0, 36)
+    else:
+        values = np.asarray(gammas, dtype=float)
+    values = np.unique(values)
+    if values.size == 0 or not np.all(np.isfinite(values)) or np.any(values <= 0):
+        raise ValueError("Skill-horizon gamma values must be positive finite numbers.")
+    return values
+
+
+def _relative_rollout_errors_by_ic(rollout_dir: str | Path) -> Dict[int, Dict[int, float]]:
+    """Load saved prediction/truth tensors and compute relative errors by IC."""
+    rollout_dir = Path(rollout_dir)
+    pred_files = _preferred_ic_step_files(rollout_dir, "prediction", ".pt")
+    truth_files = _preferred_ic_step_files(rollout_dir, "truth", ".pt")
+    per_ic_errors: Dict[int, Dict[int, float]] = {}
+
+    for ic in sorted(set(pred_files) & set(truth_files)):
+        common_steps = sorted(set(pred_files[ic]) & set(truth_files[ic]))
+        if not common_steps:
+            continue
+        per_ic_errors[ic] = {}
+        for step in common_steps:
+            pred = load_field_pt(pred_files[ic][step])
+            truth = load_field_pt(truth_files[ic][step])
+            per_ic_errors[ic][step] = _relative_field_error(pred, truth)
+    return per_ic_errors
+
+
+def _skill_horizon_for_errors(
+    steps: np.ndarray,
+    errors: np.ndarray,
+    gammas: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return first saved step where error exceeds each threshold."""
+    valid = ~np.isnan(errors)
+    finite_steps = steps[valid]
+    finite_errors = errors[valid]
+    if finite_steps.size == 0:
+        raise ValueError("Cannot compute skill horizon from all-NaN rollout errors.")
+
+    max_step = float(np.max(finite_steps))
+    horizons = np.full(gammas.shape, max_step, dtype=float)
+    crossed = np.zeros(gammas.shape, dtype=bool)
+    for i, gamma in enumerate(gammas):
+        hit_indices = np.flatnonzero(finite_errors > gamma)
+        if hit_indices.size:
+            horizons[i] = float(finite_steps[int(hit_indices[0])])
+            crossed[i] = True
+    return horizons, crossed
+
+
+def _relative_field_error(prediction: np.ndarray, truth: np.ndarray) -> float:
+    """Relative L2 field error over all channels and spatial grid points."""
+    diff = prediction - truth
+    numerator = float(np.sqrt(np.nansum(diff * diff)))
+    denominator = float(np.sqrt(np.nansum(truth * truth)))
+    if denominator <= 0.0:
+        return 0.0 if numerator <= 0.0 else float("inf")
+    return numerator / denominator
+
+
+def _preferred_ic_step_files(rollout_dir: Path, kind: str, suffix: str) -> Dict[int, Dict[int, Path]]:
+    """Return preferred saved tensor files grouped by initial condition."""
+    candidates: List[Tuple[int, int, int, Path]] = []
+    pattern = re.compile(rf"^(?:ic(?P<ic>\d+)_)?{re.escape(kind)}_(?P<step>\d+){re.escape(suffix)}$")
+    for path in rollout_dir.glob(f"*{kind}_*{suffix}"):
+        match = pattern.match(path.name)
+        if not match:
+            continue
+        ic = int(match.group("ic") or 0)
+        step_digits = match.group("step")
+        candidates.append((ic, int(step_digits), len(step_digits), path))
+    if not candidates:
+        return {}
+
+    preferred_width = max(width for _, _, width, _ in candidates)
+    grouped: Dict[int, Dict[int, Path]] = {}
+    for ic, step, width, path in sorted(candidates, key=lambda item: (item[0], item[1], item[3].name)):
+        if width == preferred_width:
+            grouped.setdefault(ic, {})[step] = path
+    return grouped
 
 
 def _path_step(path: Path) -> Optional[int]:

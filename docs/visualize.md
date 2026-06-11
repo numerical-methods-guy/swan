@@ -466,6 +466,7 @@ figures_forecast/
   forecast_error_curve_l2.png
   forecast_accuracy_bar_l2.png
   forecast_runtime_ratio_bar.png
+  skill_horizon_vs_gamma.png              # only with --skill_horizon
   forecast_prediction_grid_vorticity_final.png
   forecast_error_grid_vorticity_final_signed.png
   forecast_spectra_final.png
@@ -490,6 +491,8 @@ figures_forecast/
 | `--channel` | no | `vorticity` | `h`, `vorticity`, `divergence` | Field channel for spatial plots. |
 | `--error_metric` | no | `l2` | `loss`, `l1`, `l2`, `w11` | Scalar forecast metric for curves/bars. |
 | `--forecast_error_scale` | no | `linear` | `linear`, `log` | Y-axis scale for `forecast_error_curve_<metric>.png`. |
+| `--skill_horizon` | no | off | flag | Also write `skill_horizon_vs_gamma.png`, the first saved rollout step where the relative all-channel field error exceeds each gamma threshold. |
+| `--skill_horizon_gammas` | no | 36 values from `0.25` to `2.0` | floats | Gamma thresholds used by `--skill_horizon`. |
 | `--error_mode` | no | `signed` | `signed`, `abs`, `squared` | Pointwise error map mode. |
 | `--summary_step` | no | `final` | `final`, `latest`, or integer | Rollout step loaded for grid and spectra plots. |
 | `--spherical_method` | no | `spherical` | `spherical`, `fft` | Spectral method for `forecast_spectra_final.png`. |
@@ -689,7 +692,63 @@ Lower is better. A value of `1.0` means the ML rollout and non-ML solver took
 the same time; values above `1.0` mean the ML rollout was slower than the
 non-ML solver, and values below `1.0` mean it was faster.
 
-### 4. Prediction Grid
+### 4. Skill Horizon Curve
+
+```text
+skill_horizon_vs_gamma.png
+```
+
+This optional plot is written only when `--skill_horizon` is passed.
+
+It plots allowed relative error threshold on the x-axis and reliable rollout
+length on the y-axis.
+
+For each saved rollout step, the relative all-channel field error is:
+
+```math
+e(t) =
+\frac{
+\left(
+\|\widetilde h(t)-h(t)\|_{\ell^2(X_h)}^2
++ \|\widetilde\zeta(t)-\zeta(t)\|_{\ell^2(X_h)}^2
++ \|\widetilde\delta(t)-\delta(t)\|_{\ell^2(X_h)}^2
+\right)^{1/2}
+}{
+\left(
+\|h(t)\|_{\ell^2(X_h)}^2
++ \|\zeta(t)\|_{\ell^2(X_h)}^2
++ \|\delta(t)\|_{\ell^2(X_h)}^2
+\right)^{1/2}
+}.
+```
+
+The skill horizon is:
+
+```math
+T_{\mathrm{skill}}(\gamma) = \min\{t:e(t)>\gamma\}.
+```
+
+In the figure, `T_skill(gamma)` is evaluated on saved rollout snapshots. For
+example, if `--output_freq 5`, possible y-axis values are `0, 5, 10, ...`.
+This is why multiple gamma thresholds can map to the same y-axis value: the
+error may cross several thresholds between two saved snapshots, and the plot
+reports the first saved step after those crossings.
+
+If multiple initial conditions are saved, the plotted value is the median skill
+horizon over initial conditions. Open markers indicate thresholds that were not
+crossed within the saved rollout horizon.
+
+Example:
+
+```bash
+python -m visualize forecast \
+  --runs ./logs/adam/version_0 ./logs/adamw/version_0 \
+  --labels Adam AdamW \
+  --skill_horizon \
+  --skill_horizon_gammas 0.25 0.5 1.0 1.5 2.0
+```
+
+### 5. Prediction Grid
 
 ```text
 forecast_prediction_grid_vorticity_final.png
@@ -699,7 +758,7 @@ Shows ground truth and all optimizer predictions at the selected rollout step.
 
 All panels use the same color scale.
 
-### 5. Pointwise Error Grid
+### 6. Pointwise Error Grid
 
 ```text
 forecast_error_grid_vorticity_final_signed.png
@@ -729,7 +788,7 @@ error = prediction - truth
 
 All pointwise error panels use one shared automatic color scale. Signed errors use a symmetric scale around zero; absolute and squared errors use the shared data min/max.
 
-### 6. Combined Spectral Plot
+### 7. Combined Spectral Plot
 
 ```text
 forecast_spectra_final.png
