@@ -96,23 +96,52 @@ training:
     cg_tol: 1.0e-6         # matrix_free only
     step_size: 1.0
     max_step_norm: 1.0
+  
   muon:
-    learning_rate: 1.0e-2
-    finetune_learning_rate: 1.0e-3
-    momentum: 0.95
-    weight_decay: 0.0
+    learning_rate: 0.016580880399992545
+    finetune_learning_rate: 0.016580880399992545
+    momentum: 0.9693288408530596
+    weight_decay: 1.0e-5
+
+  muon_new:
+    learning_rate: 0.0035749829464460365
+    finetune_learning_rate: 0.0035749829464460365
+    muon_lr: 0.016580880399992545
+    adamw_lr: 0.009585083430505998
+    muon_momentum: 0.9693288408530596
+    muon_weight_decay: 1.0e-5
+    adamw_weight_decay: 1.0e-6
   sgd:
     learning_rate: 0.0019660079628529524
     finetune_learning_rate: 1.0e-3
     momentum: 0.9894502541863339
     weight_decay: 0.0
   mud:
-    learning_rate: 1.0e-2
-    finetune_learning_rate: 1.0e-3
-    weight_decay: 1.0e-2
-    beta: 0.95
-    passes: 1
-    epsilon: 1.0e-8
+    learning_rate: 0.002115429079726122
+    mud_lr: 0.057279044707996205
+    finetune_mud_lr: 0.0027476381910290757
+    adamw_lr: 0.004835952776465951
+    finetune_adamw_lr: 0.0004835952776465951
+    mud_weight_decay: 1.0e-6
+    adamw_weight_decay: 1.0e-5
+    adamw_beta1: 0.8919535259473597
+    adamw_beta2: 0.9899898606461786
+    beta: 0.8267756027452049
+    passes: 3
+  mud_new:
+    learning_rate: 0.00024380003254969372
+    mud_lr: 0.027476381910290757
+    finetune_mud_lr: 0.0027476381910290757
+    adamw_lr: 0.0025461232235851378
+    finetune_adamw_lr: 0.00025461232235851378
+    mud_weight_decay: 0.01
+    adamw_weight_decay: 1.0e-05
+    beta: 0.8042375541365122
+    passes: 2
+    mud_eps: 3.0068834339625996e-07
+    beta1: 0.8184984297256701
+    beta2: 0.9527251114137002
+    adamw_epsilon: 4.819227614578437e-09
 
   nfuture: 1
   amp_mode: "none"      # Options: "none", "fp16", "bf16"
