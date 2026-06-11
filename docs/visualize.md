@@ -484,11 +484,11 @@ figures_forecast/
 | `--checkpoint_choice` | no | `best` | `best`, `last` | Which checkpoint to use from each run. |
 | `--autoreg_steps` | no | `100` | integer | Number of autoregressive rollout steps. |
 | `--output_freq` | no | `10` | integer | Save rollout tensors/plots every N steps. |
-| `--num_ics` | no | `1` | integer | Number of forecast initial conditions. |
+| `--num_ics` | no | `1` | integer | Number of forecast initial conditions. Scalar curve/bar plots use the rollout initial condition saved to disk, so they do not average across initial conditions. |
 | `--ic_type` | no | `random` | `random`, `galewsky` | Forecast initial-condition type. |
 | `--seed` | no | `42` | integer | Forecast-time random seed. |
 | `--channel` | no | `vorticity` | `h`, `vorticity`, `divergence` | Field channel for spatial plots. |
-| `--error_metric` | no | `l2` | `loss`, `l1`, `l2`, `w11` | Scalar forecast metric for curves/bars (aggregated). |
+| `--error_metric` | no | `l2` | `loss`, `l1`, `l2`, `w11` | Scalar forecast metric for curves/bars. |
 | `--forecast_error_scale` | no | `linear` | `linear`, `log` | Y-axis scale for `forecast_error_curve_<metric>.png`. |
 | `--error_mode` | no | `signed` | `signed`, `abs`, `squared` | Pointwise error map mode. |
 | `--summary_step` | no | `final` | `final`, `latest`, or integer | Rollout step loaded for grid and spectra plots. |
@@ -640,6 +640,10 @@ forecast_error_curve_l2.png
 
 Plots forecast error against autoregressive rollout step.
 
+`forecast_error_curve_l2.png` uses a spatial and channel mean at each rollout
+step for the saved rollout initial condition only. It does not average across
+initial conditions.
+
 ```text
 x-axis = rollout step
 y-axis = selected scalar error metric
@@ -662,7 +666,10 @@ absolute-error reading.
 forecast_accuracy_bar_l2.png
 ```
 
-Plots one aggregate forecast error value per optimizer, usually averaged over rollout steps and initial conditions.
+Plots one aggregate forecast error value per optimizer.
+
+`forecast_accuracy_bar_l2.png` is the temporal mean over rollout steps of the
+spatial and channel mean error for the saved rollout initial condition only.
 
 This is a bar chart, not a histogram.
 

@@ -304,10 +304,9 @@ def run_real_rollouts(
             "W11_error": model_module.metric_w11,
         }
 
-        if ic_type == "galewsky":
-            actual_num_ics = 1
-        else:
-            actual_num_ics = num_ics
+        # Forecast comparison figures should match the saved rollout tensors:
+        # the first rollout IC only, with no averaging across additional ICs.
+        actual_num_ics = 1
 
         all_step_metrics: List[Dict[str, List[float]]] = []
         all_ml_times: List[float] = []
@@ -399,7 +398,7 @@ def create_synthetic_rollouts(
         ml_times: List[float] = []
         solver_times: List[float] = []
 
-        for ic in range(num_ics):
+        for ic in range(1):
             phase = 0.3 * ic
             step_metrics = {"L1_error": [], "L2_error": [], "W11_error": [], "loss": []}
 

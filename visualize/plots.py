@@ -477,14 +477,17 @@ def plot_forecast_error_curve(
 
     ax.set_xlabel("Autoregressive Rollout Step")
     ax.set_ylabel(axis_label_text(display_column))
-    ax.set_title(title_case(f"forecast {display_column} over rollout"))
+    title = f"Forecast {display_metric_text(error_metric)} Over Rollout: All Channels"
+    subtitle = "Spatial and channel mean per step; rollout initial condition only; no initial-condition averaging"
+    output_name = f"forecast_error_curve_{error_metric}.png"
+    ax.set_title(f"{title}\n{subtitle}", fontweight="bold")
     ax.set_yscale(yscale)
     if yscale == "log":
         apply_log_axis_style(ax, "y")
     ax.grid(True, which="major", alpha=0.3)
     style_plot_legend(ax)
     fig.tight_layout(rect=(0, 0, 1, 1))
-    save_figure(fig, outdir / f"forecast_error_curve_{error_metric}.png")
+    save_figure(fig, outdir / output_name)
 
 
 def _bar_colors(n: int):
@@ -528,7 +531,11 @@ def _annotate_bars(ax: plt.Axes, bars) -> None:
     ax.set_ylim(top=max(ax.get_ylim()[1], ymax + 5 * pad))
 
 
-def plot_forecast_accuracy_bar(rollout_runs: Sequence[roll.RolloutRun], error_metric: str, outdir: Path) -> None:
+def plot_forecast_accuracy_bar(
+    rollout_runs: Sequence[roll.RolloutRun],
+    error_metric: str,
+    outdir: Path,
+) -> None:
     """Plot aggregate forecast error from metrics.csv."""
     column = roll.metric_mean_column(error_metric)
     display_column = display_metric_text(column)
@@ -538,11 +545,14 @@ def plot_forecast_accuracy_bar(rollout_runs: Sequence[roll.RolloutRun], error_me
     fig, ax = plt.subplots(figsize=(max(8.5, 1.25 * len(labels)), 5.4))
     bars = ax.bar(labels, values, color=optimizer_bar_colors(labels), edgecolor="black", linewidth=0.7, alpha=0.88)
     ax.set_ylabel(title_case(f"{display_column} (lower is better)"))
-    ax.set_title(title_case(f"aggregate forecast accuracy: {display_column}"), fontweight="bold")
+    title = f"Aggregate Forecast {display_metric_text(error_metric)}: All Channels"
+    subtitle = "Temporal mean over rollout steps of spatial and channel mean error; rollout initial condition only"
+    output_name = f"forecast_accuracy_bar_{error_metric}.png"
+    ax.set_title(f"{title}\n{subtitle}", fontweight="bold")
     _style_bar_axes(ax)
     _annotate_bars(ax, bars)
     fig.tight_layout()
-    save_figure(fig, outdir / f"forecast_accuracy_bar_{error_metric}.png")
+    save_figure(fig, outdir / output_name)
 
 
 def plot_forecast_runtime_ratio_bar(rollout_runs: Sequence[roll.RolloutRun], outdir: Path) -> None:
