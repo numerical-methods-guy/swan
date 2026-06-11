@@ -138,7 +138,13 @@ class MudNewStrategy(TrainingStrategy):
                 train_adamw_cfg.get("learning_rate", lr),
             ),
         )
-
+        if module.nfuture > 0:
+            mud_lr = train_cfg.get(
+                "finetune_mud_lr",
+                train_mud_cfg.get("finetune_mud_lr", mud_lr),
+            )
+            adamw_lr = train_cfg.get("finetune_adamw_lr", train_mud_cfg.get("finetune_adamw_lr", adamw_lr),
+            )
         weight_decay = train_cfg.get(
             "weight_decay",
             train_mud_cfg.get("weight_decay", 1e-2),
@@ -206,15 +212,19 @@ class MudNewStrategy(TrainingStrategy):
             eps=mud_eps,
             adamw_eps=adamw_epsilon,
         )
-
         milestones = train_cfg.get("lr_milestones", None)
         gamma = train_cfg.get("lr_gamma", 0.5)
         cosine_eta_min = train_cfg.get("cosine_eta_min", None)
 
         if cosine_eta_min is not None:
+            num_epochs = (
+                train_cfg.get("finetune_epochs")
+                if module.nfuture > 0
+                else train_cfg.get("pretrain_epochs")
+            )
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=train_cfg.get("pretrain_epochs"),
+                T_max=max(1, int(num_epochs)),
                 eta_min=cosine_eta_min,
             )
             schedulers = [{"scheduler": scheduler, "interval": "epoch"}]
