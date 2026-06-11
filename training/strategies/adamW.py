@@ -32,9 +32,12 @@ class AdamWStrategy(TrainingStrategy):
         optimizer = torch.optim.AdamW(module.parameters(), lr=lr, betas = (beta1,beta2), eps=epsilon, weight_decay=weight_decay, foreach=True)
 
         if cosine_eta_min is not None:
+            num_epochs = train_common_cfg.get(
+                "finetune_epochs" if module.nfuture > 0 else "pretrain_epochs"
+            )
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=train_common_cfg.get("pretrain_epochs"),
+                T_max=max(1, int(num_epochs)),
                 eta_min=cosine_eta_min,
             )
             return {

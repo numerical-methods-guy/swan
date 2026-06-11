@@ -42,9 +42,18 @@ class TrainingStrategy(ABC):
         """Return optimizer-specific config dict, or empty dict if missing."""
         return self.config.get("training", {})
 
-    def _resolve_lr(self, module: pl.LightningModule, name) -> float:
-        train_cfg = self._optim_cfg(name)
-        lr = train_cfg["finetune_learning_rate"]
+    def _resolve_lr(self, module: pl.LightningModule, name: str) -> float:
+        train_cfg = self._training_cfg()
+        optim_cfg = self._optim_cfg(name)
+
+        lr = optim_cfg.get("learning_rate", train_cfg.get("learning_rate"))
+        if lr is None:
+            raise KeyError(f"Missing training.{name}.learning_rate")
+
         if module.nfuture > 0:
-            lr = train_cfg["finetune_learning_rate"]
+            lr = optim_cfg.get(
+                "finetune_learning_rate",
+                train_cfg.get("finetune_learning_rate", lr),
+            )
+
         return lr

@@ -18,7 +18,6 @@ class SGDStrategy(TrainingStrategy):
         milestones = train_common_cfg.get("lr_milestones", None)
         gamma = train_common_cfg.get("lr_gamma", 0.5)
         cosine_eta_min = train_common_cfg.get("cosine_eta_min", None)
-        num_epochs = train_common_cfg.get("pretrain_epochs")
 
         momentum = train_sgd_cfg.get("momentum", 0.9)
         weight_decay = train_sgd_cfg.get("weight_decay", 0.0)
@@ -38,9 +37,12 @@ class SGDStrategy(TrainingStrategy):
         )
 
         if cosine_eta_min is not None:
+            num_epochs = train_common_cfg.get(
+                "finetune_epochs" if module.nfuture > 0 else "pretrain_epochs"
+            )
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
-                T_max=num_epochs,
+                T_max=max(1, int(num_epochs)),
                 eta_min=cosine_eta_min,
             )
             return {

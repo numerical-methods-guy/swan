@@ -147,6 +147,15 @@ class MuonNewStrategy(TrainingStrategy):
                 train_adamw_cfg.get("learning_rate", lr),
             ),
         )
+        if module.nfuture > 0:
+            muon_lr = train_cfg.get(
+                "finetune_muon_lr",
+                train_muon_cfg.get("finetune_muon_lr", muon_lr),
+            )
+            adamw_lr = train_cfg.get(
+                "finetune_adamw_lr",
+                train_muon_cfg.get("finetune_adamw_lr", adamw_lr),
+            )
         muon_momentum = train_cfg.get(
             "muon_momentum",
             train_cfg.get(
@@ -201,14 +210,16 @@ class MuonNewStrategy(TrainingStrategy):
         milestones = train_cfg.get("lr_milestones", None)
         gamma = train_cfg.get("lr_gamma", 0.5)
         cosine_eta_min = train_cfg.get("cosine_eta_min", None)
-        num_epochs = train_cfg.get("pretrain_epochs")
 
         if cosine_eta_min is not None:
+            num_epochs = train_cfg.get(
+                "finetune_epochs" if module.nfuture > 0 else "pretrain_epochs"
+            )
             schedulers = [
                 {
                     "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
                         muon_optimizer,
-                        T_max=num_epochs,
+                        T_max=max(1, int(num_epochs)),
                         eta_min=cosine_eta_min,
                     ),
                     "interval": "epoch",
@@ -216,7 +227,7 @@ class MuonNewStrategy(TrainingStrategy):
                 {
                     "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
                         adamw_optimizer,
-                        T_max=num_epochs,
+                        T_max=max(1, int(num_epochs)),
                         eta_min=cosine_eta_min,
                     ),
                     "interval": "epoch",
