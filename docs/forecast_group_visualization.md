@@ -20,13 +20,13 @@ By default this wrapper does not train. It reads:
 swan_checkpoints/
   config_paradis.yaml
   logs/
-    adam/version_0/
-    adamw/version_0/
-    mud/version_0/
-    mud_new/version_0/
-    muon/version_0/
-    muon_new/version_0/
-    sgd/version_0/
+    Adam/
+    AdamW/
+    MUD_finetuned/
+    MUD_old/
+    Muon_flattened/
+    Muon_old/
+    SGD/
 ```
 
 The run root and config are set near the top of
@@ -59,10 +59,10 @@ The script always uses these groups:
 
 | Output subfolder | Optimizers |
 | --- | --- |
-| `all_optimizers` | Adam, AdamW, MUD, MUD-new, Muon, Muon-new, SGD |
-| `without_spectral_blow_up` | Adam, AdamW, MUD-new, Muon-new, SGD |
-| `without_spatial_blow_up` | Adam, AdamW, MUD, Muon-new, SGD |
-| `stable_core` | Adam, AdamW, Muon-new, SGD |
+| `all_optimizers` | Adam, AdamW, MUD-finetuned, MUD-old, Muon-flattened, Muon-old, SGD |
+| `without_spectral_blow_up` | Adam, AdamW, MUD-finetuned, Muon-flattened, SGD |
+| `without_spatial_blow_up` | Adam, AdamW, MUD-old, Muon-flattened, SGD |
+| `stable_core` | Adam, AdamW, Muon-flattened, SGD |
 | `custom` | User-defined with `CUSTOM_OPTIMIZERS` and `CUSTOM_LABELS` |
 
 Control which groups are rendered with:
@@ -75,20 +75,32 @@ The built-in groups are now defined explicitly near the top of
 `run_forecast_visualization_groups.sh` with paired arrays such as:
 
 ```bash
-ALL_OPTIMIZERS=(adam adamw mud mud_new muon muon_new sgd)
-ALL_LABELS=(Adam AdamW MUD MUD-new Muon Muon-new SGD)
+ALL_OPTIMIZERS=(Adam AdamW MUD_finetuned MUD_old Muon_flattened Muon_old SGD)
+ALL_LABELS=(Adam AdamW MUD-finetuned MUD-old Muon-flattened Muon-old SGD)
 ```
 
 Each `*_OPTIMIZERS` entry must use the exact subfolder names under
 `swan_checkpoints/logs`, while each `*_LABELS` entry is only the human-readable
 plot label.
 
+The helper accepts either of these checkpoint layouts:
+
+```text
+swan_checkpoints/logs/<optimizer>/checkpoints/
+```
+
+or
+
+```text
+swan_checkpoints/logs/<optimizer>/version_0/checkpoints/
+```
+
 To render a custom group:
 
 ```bash
 VIS_GROUPS=(all_optimizers custom)
-CUSTOM_OPTIMIZERS=(adam adamw muon_new)
-CUSTOM_LABELS=(Adam AdamW Muon-new)
+CUSTOM_OPTIMIZERS=(Adam AdamW Muon_flattened)
+CUSTOM_LABELS=(Adam AdamW Muon-flattened)
 ```
 
 The full group runs forecast rollouts first. The other groups reuse the saved
@@ -121,9 +133,8 @@ disabled by default:
 run_history_plots=false
 ```
 
-Set it to `true` only if each `swan_checkpoints/logs/<optimizer>/version_0`
-folder contains `events.out.tfevents*`, `scalars.csv`, `history.csv`, or
-`metrics_history.csv`.
+Set it to `true` only if each run folder contains `events.out.tfevents*`,
+`scalars.csv`, `history.csv`, or `metrics_history.csv`.
 
 ## Basic Usage
 
@@ -151,20 +162,20 @@ visualization_output_freq=10
 visualization_skill_horizon=true
 visualization_spectral_horizon=true
 visualization_spectral_horizon_modes=(abs positive)
-visualization_spectral_eta_factor=2.0
+visualization_spectral_eta_factors=(1.05 1.1 1.25 1.5 2 5)
 run_history_plots=false
 delete_rollouts_after_plotting=true
-VIS_GROUPS=(all_optimizers)
-ALL_OPTIMIZERS=(adam adamw mud mud_new muon muon_new sgd)
-ALL_LABELS=(Adam AdamW MUD MUD-new Muon Muon-new SGD)
-WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS=(adam adamw mud_new muon_new sgd)
-WITHOUT_SPECTRAL_BLOW_UP_LABELS=(Adam AdamW MUD-new Muon-new SGD)
-WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS=(adam adamw mud muon_new sgd)
-WITHOUT_SPATIAL_BLOW_UP_LABELS=(Adam AdamW MUD Muon-new SGD)
-STABLE_CORE_OPTIMIZERS=(adam adamw muon_new sgd)
-STABLE_CORE_LABELS=(Adam AdamW Muon-new SGD)
-CUSTOM_OPTIMIZERS=()
-CUSTOM_LABELS=()
+VIS_GROUPS=(all_optimizers custom)
+ALL_OPTIMIZERS=(Adam AdamW MUD_finetuned MUD_old Muon_flattened Muon_old SGD)
+ALL_LABELS=(Adam AdamW MUD-finetuned MUD-old Muon-flattened Muon-old SGD)
+WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS=(Adam AdamW MUD_finetuned Muon_flattened SGD)
+WITHOUT_SPECTRAL_BLOW_UP_LABELS=(Adam AdamW MUD-finetuned Muon-flattened SGD)
+WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS=(Adam AdamW MUD_old Muon_flattened SGD)
+WITHOUT_SPATIAL_BLOW_UP_LABELS=(Adam AdamW MUD-old Muon-flattened SGD)
+STABLE_CORE_OPTIMIZERS=(Adam AdamW Muon_flattened SGD)
+STABLE_CORE_LABELS=(Adam AdamW Muon-flattened SGD)
+CUSTOM_OPTIMIZERS=(Adam AdamW)
+CUSTOM_LABELS=(Adam AdamW)
 visualization_animation_pacing="slow"
 reuse_legacy_rollouts=false
 ```

@@ -41,9 +41,12 @@ overwrite_visualization_outputs=false
 
 # Visualization settings passed to visualize_two_group_optimizers.sh for this wrapper
 # run. Direct runs of visualize_two_group_optimizers.sh keep that file's defaults.
-# Folder containing checkpoint runs such as swan_checkpoints/logs/adam/version_0.
+# Folder containing checkpoint runs such as swan_checkpoints/logs/Adam or
+# swan_checkpoints/logs/adam/version_0.
 visualization_runs_root="./swan_checkpoints/logs"
 # YAML config used by visualize forecast for dataset/model metadata.
+# If this exact path does not exist, the helper also tries
+# dirname(visualization_runs_root)/config_paradis.yaml and ./config_paradis.yaml.
 visualization_config="./swan_checkpoints/config_paradis.yaml"
 # Forecast field to show in spatial plots, for example vorticity.
 visualization_channel="vorticity"
@@ -66,7 +69,7 @@ visualization_spectral_eta_factors=(1.05 1.1 1.25 1.5 2 5)
 # Total autoregressive rollout length in model steps.
 visualization_autoreg_steps=250
 # Save forecast outputs every N rollout steps.
-visualization_output_freq=10
+visualization_output_freq=5
 # When true, also run training-history plots for each group.
 run_history_plots=false
 # When true, delete saved rollout .pt files after figures/animations are made.
@@ -74,7 +77,7 @@ delete_rollouts_after_plotting=true
 
 # Available visualization groups.
 # - Every *_OPTIMIZERS entry must use the exact checkpoint subfolder names under
-#   swan_checkpoints/logs, for example: adam, mud_new, muon_new.
+#   swan_checkpoints/logs, for example: Adam, MUD_finetuned, Muon_flattened.
 # - Every *_LABELS entry is only for plot legends/titles and can be written in a
 #   more readable form, for example: Adam, MUD-new, Muon-new.
 # - Keep each *_OPTIMIZERS list aligned with its matching *_LABELS list.
@@ -84,29 +87,29 @@ delete_rollouts_after_plotting=true
 VIS_GROUPS=(all_optimizers custom)
 
 # Group: all_optimizers
-ALL_OPTIMIZERS=(adam adamw mud mud_new muon muon_new sgd)
-ALL_LABELS=(Adam AdamW MUD MUD-new Muon Muon-new SGD)
+ALL_OPTIMIZERS=(Adam AdamW MUD_finetuned MUD_old Muon_flattened Muon_old SGD)
+ALL_LABELS=(Adam AdamW MUD-finetuned MUD-old Muon-flattened Muon-old SGD)
 
 # Group: without_spectral_blow_up
-# Excludes MUD and Muon.
-WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS=(adam adamw mud_new muon_new sgd)
-WITHOUT_SPECTRAL_BLOW_UP_LABELS=(Adam AdamW MUD-new Muon-new SGD)
+# Excludes MUD-old and Muon-old.
+WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS=(Adam AdamW MUD_finetuned Muon_flattened SGD)
+WITHOUT_SPECTRAL_BLOW_UP_LABELS=(Adam AdamW MUD-finetuned Muon-flattened SGD)
 
 # Group: without_spatial_blow_up
-# Excludes MUD-new and Muon.
-WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS=(adam adamw mud muon_new sgd)
-WITHOUT_SPATIAL_BLOW_UP_LABELS=(Adam AdamW MUD Muon-new SGD)
+# Excludes MUD-finetuned and Muon-old.
+WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS=(Adam AdamW MUD_old Muon_flattened SGD)
+WITHOUT_SPATIAL_BLOW_UP_LABELS=(Adam AdamW MUD-old Muon-flattened SGD)
 
 # Group: stable_core
-# Excludes MUD, MUD-new, and Muon.
-STABLE_CORE_OPTIMIZERS=(adam adamw muon_new sgd)
-STABLE_CORE_LABELS=(Adam AdamW Muon-new SGD)
+# Excludes both MUD variants and Muon-old.
+STABLE_CORE_OPTIMIZERS=(Adam AdamW Muon_flattened SGD)
+STABLE_CORE_LABELS=(Adam AdamW Muon-flattened SGD)
 
 # Group: custom
 # Used only when VIS_GROUPS includes the literal group name "custom".
 # Put the exact folder names you want in CUSTOM_OPTIMIZERS and the plot labels
 # you want in CUSTOM_LABELS.
-CUSTOM_OPTIMIZERS=(adam adamw)
+CUSTOM_OPTIMIZERS=(Adam AdamW)
 CUSTOM_LABELS=(Adam AdamW)
 
 # Animation playback mode for generated GIFs: standard, smooth, or slow.

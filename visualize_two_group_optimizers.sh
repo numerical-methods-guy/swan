@@ -128,10 +128,18 @@ animation_fps_for_pacing() {
 build_runs() {
   local -n optimizers_ref="$1"
   local -n runs_ref="$2"
+  local direct_run
+  local versioned_run
 
   runs_ref=()
   for opt in "${optimizers_ref[@]}"; do
-    runs_ref+=("${runs_root}/${opt}/version_0")
+    direct_run="${runs_root}/${opt}"
+    versioned_run="${runs_root}/${opt}/version_0"
+    if [[ -d "${direct_run}/checkpoints" ]]; then
+      runs_ref+=("${direct_run}")
+    else
+      runs_ref+=("${versioned_run}")
+    fi
   done
 }
 
@@ -186,7 +194,8 @@ check_inputs() {
   if [[ "${missing}" -ne 0 ]]; then
     echo "Expected swan_checkpoints layout:" >&2
     echo "  swan_checkpoints/config_paradis.yaml" >&2
-    echo "  swan_checkpoints/logs/<optimizer>/version_0" >&2
+    echo "  swan_checkpoints/logs/<optimizer>/checkpoints" >&2
+    echo "  or swan_checkpoints/logs/<optimizer>/version_0/checkpoints" >&2
     exit 1
   fi
 }
