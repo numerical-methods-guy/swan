@@ -11,13 +11,16 @@ history_scale="${HISTORY_SCALE:-log}"
 forecast_error_scale="${FORECAST_ERROR_SCALE:-log}"
 plot_skill_horizon="${PLOT_SKILL_HORIZON:-false}"
 skill_horizon_gammas="${SKILL_HORIZON_GAMMAS:-}"
+plot_spectral_horizon="${PLOT_SPECTRAL_HORIZON:-false}"
+spectral_horizon_modes_text="${SPECTRAL_HORIZON_MODES:-abs positive}"
+spectral_eta_factors_text="${SPECTRAL_ETA_FACTORS:-1.05 1.1 1.25 1.5 2}"
 autoreg_steps="${AUTOREG_STEPS:-100}"
 output_freq="${OUTPUT_FREQ:-5}"
 nlat="${VIS_NLAT:-128}"
 nlon="${VIS_NLON:-256}"
 animation_pacing="${ANIMATION_PACING:-standard}"
 run_history_plots="${RUN_HISTORY_PLOTS:-false}"
-visualization_root="${VISUALIZATION_ROOT:-./visualization_runs_two_groups}"
+visualization_root="${VISUALIZATION_ROOT:-./forecast_group_visualizations}"
 visualization_version="${VISUALIZATION_VERSION:-auto}"
 overwrite_visualization_outputs="${OVERWRITE_VISUALIZATION_OUTPUTS:-false}"
 read -r -a vis_groups <<< "${VIS_GROUPS:-all_optimizers without_spectral_blow_up without_spatial_blow_up stable_core}"
@@ -32,24 +35,17 @@ delete_rollouts_after_plotting="${DELETE_ROLLOUTS_AFTER_PLOTTING:-true}"
 # ---------------------------------------------------------------------------
 # Optimizer groups
 # ---------------------------------------------------------------------------
-# Full comparison.
-all_optimizers=(adam adamw mud mud_new muon muon_new sgd)
-all_labels=(Adam AdamW MUD MUD-new Muon Muon-new SGD)
+# Explicit group definitions provided by the user-facing wrapper.
+read -r -a all_optimizers <<< "${ALL_OPTIMIZERS:-adam adamw mud mud_new muon muon_new sgd}"
+read -r -a all_labels <<< "${ALL_LABELS:-Adam AdamW MUD MUD-new Muon Muon-new SGD}"
+read -r -a without_spectral_blow_up_optimizers <<< "${WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS:-adam adamw mud_new muon_new sgd}"
+read -r -a without_spectral_blow_up_labels <<< "${WITHOUT_SPECTRAL_BLOW_UP_LABELS:-Adam AdamW MUD-new Muon-new SGD}"
+read -r -a without_spatial_blow_up_optimizers <<< "${WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS:-adam adamw mud muon_new sgd}"
+read -r -a without_spatial_blow_up_labels <<< "${WITHOUT_SPATIAL_BLOW_UP_LABELS:-Adam AdamW MUD Muon-new SGD}"
+read -r -a stable_core_optimizers <<< "${STABLE_CORE_OPTIMIZERS:-adam adamw muon_new sgd}"
+read -r -a stable_core_labels <<< "${STABLE_CORE_LABELS:-Adam AdamW Muon-new SGD}"
 
-# Spectral-domain comparison excluding the spectral blow-ups MUD and Muon.
-without_spectral_blow_up_optimizers=(adam adamw mud_new muon_new sgd)
-without_spectral_blow_up_labels=(Adam AdamW MUD-new Muon-new SGD)
-
-# Spatial-domain comparison excluding the L2 blow-ups MUD-new and Muon.
-without_spatial_blow_up_optimizers=(adam adamw mud muon_new sgd)
-without_spatial_blow_up_labels=(Adam AdamW MUD Muon-new SGD)
-
-# Stable comparison excluding MUD, MUD-new, and Muon.
-stable_core_optimizers=(adam adamw muon_new sgd)
-stable_core_labels=(Adam AdamW Muon-new SGD)
-
-# User-defined comparison group. Override these from the cluster wrapper by
-# passing CUSTOM_OPTIMIZERS and CUSTOM_LABELS.
+# Optional user-defined comparison group.
 read -r -a custom_optimizers <<< "${CUSTOM_OPTIMIZERS:-}"
 read -r -a custom_labels <<< "${CUSTOM_LABELS:-}"
 
@@ -115,13 +111,41 @@ build_runs() {
 check_inputs() {
   local run
   local missing=0
+  local -a runs_to_check=()
+  local group
 
   if [[ ! -f "${config_path}" ]]; then
     echo "Error: config does not exist: ${config_path}" >&2
     missing=1
   fi
 
-  for run in "${all_runs[@]}"; do
+  for group in "${vis_groups[@]}"; do
+    case "${group}" in
+      all_optimizers)
+        runs_to_check+=("${all_runs[@]}")
+        ;;
+      without_spectral_blow_up)
+        runs_to_check+=("${without_spectral_blow_up_runs[@]}")
+        ;;
+      without_spatial_blow_up)
+        runs_to_check+=("${without_spatial_blow_up_runs[@]}")
+        ;;
+      stable_core)
+        runs_to_check+=("${stable_core_runs[@]}")
+        ;;
+      custom)
+        runs_to_check+=("${custom_runs[@]}")
+        ;;
+      *)
+        echo "Error: unknown visualization group '${group}'." >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  readarray -t runs_to_check < <(printf '%s\n' "${runs_to_check[@]}" | awk 'NF && !seen[$0]++')
+
+  for run in "${runs_to_check[@]}"; do
     if [[ ! -d "${run}" ]]; then
       echo "Error: run directory does not exist: ${run}" >&2
       missing=1
@@ -229,36 +253,67 @@ run_forecast_group() {
 
   local -a forecast_cmd
   local -a skill_gamma_args=()
+  local -a spectral_modes=()
+  local -a spectral_eta_factors=()
+  local mode
+  local eta_factor
+  local first_forecast=true
   if [[ -n "${skill_horizon_gammas}" ]]; then
     read -r -a skill_gamma_args <<< "${skill_horizon_gammas}"
   fi
-  forecast_cmd=(
-    python -m visualize forecast
-    --labels "${labels_ref[@]}" \
-    --config "${config_path}" \
-    --autoreg_steps "${autoreg_steps}" \
-    --spherical_method spherical \
-    --summary_step final \
-    --output_freq "${output_freq}" \
-    --nlat "${nlat}" \
-    --nlon "${nlon}" \
-    --channel "${channel}" \
-    --rollout_dir "${rollout_dir}" \
-    --forecast_error_scale "${forecast_error_scale}" \
-    --outdir "${forecast_dir}"
-  )
-  if [[ "${plot_skill_horizon}" == "true" ]]; then
-    forecast_cmd+=(--skill_horizon)
-    if [[ "${#skill_gamma_args[@]}" -gt 0 ]]; then
-      forecast_cmd+=(--skill_horizon_gammas "${skill_gamma_args[@]}")
-    fi
+
+  if [[ "${plot_spectral_horizon}" == "true" ]]; then
+    read -r -a spectral_modes <<< "${spectral_horizon_modes_text}"
+    read -r -a spectral_eta_factors <<< "${spectral_eta_factors_text}"
   fi
-  if [[ "${reuse_rollouts}" == "true" ]]; then
-    forecast_cmd+=(--reuse_rollouts)
-  else
-    forecast_cmd+=(--runs "${runs_ref[@]}")
+  if [[ "${#spectral_modes[@]}" -eq 0 ]]; then
+    spectral_modes=("")
   fi
-  "${forecast_cmd[@]}"
+  if [[ "${#spectral_eta_factors[@]}" -eq 0 ]]; then
+    spectral_eta_factors=("2.0")
+  fi
+
+  if [[ "${plot_spectral_horizon}" == "true" ]]; then
+    echo "Note: each spectral mode / eta-factor pass reruns visualize forecast."
+    echo "Common forecast files keep the same names and are overwritten in place."
+    echo "Only spectral_horizon_* files accumulate as separate outputs."
+  fi
+
+  for eta_factor in "${spectral_eta_factors[@]}"; do
+    for mode in "${spectral_modes[@]}"; do
+      forecast_cmd=(
+        python -m visualize forecast
+        --labels "${labels_ref[@]}" \
+        --config "${config_path}" \
+        --autoreg_steps "${autoreg_steps}" \
+        --spherical_method spherical \
+        --summary_step final \
+        --output_freq "${output_freq}" \
+        --nlat "${nlat}" \
+        --nlon "${nlon}" \
+        --channel "${channel}" \
+        --rollout_dir "${rollout_dir}" \
+        --forecast_error_scale "${forecast_error_scale}" \
+        --outdir "${forecast_dir}"
+      )
+      if [[ "${plot_skill_horizon}" == "true" ]]; then
+        forecast_cmd+=(--skill_horizon)
+        if [[ "${#skill_gamma_args[@]}" -gt 0 ]]; then
+          forecast_cmd+=(--skill_horizon_gammas "${skill_gamma_args[@]}")
+        fi
+      fi
+      if [[ "${plot_spectral_horizon}" == "true" ]]; then
+        forecast_cmd+=(--spectral_horizon --spectral_horizon_mode "${mode}" --spectral_eta_factor "${eta_factor}")
+      fi
+      if [[ "${reuse_rollouts}" == "true" || "${first_forecast}" == "false" ]]; then
+        forecast_cmd+=(--reuse_rollouts)
+      else
+        forecast_cmd+=(--runs "${runs_ref[@]}")
+      fi
+      "${forecast_cmd[@]}"
+      first_forecast=false
+    done
+  done
 
   echo "=== Animating ${group_name} forecast comparison ==="
   local animation_fps
@@ -298,7 +353,7 @@ has_group_rollouts() {
 # Output folders
 # ---------------------------------------------------------------------------
 # The script writes into one versioned root by default:
-# visualization_runs_two_groups/version_N/{figures_history,figures_forecast,...}
+# forecast_group_visualizations/version_N/{figures_history,figures_forecast,...}
 if [[ -z "${FIGURES_HISTORY_ROOT:-}" && -z "${FIGURES_FORECAST_ROOT:-}" && -z "${ROLLOUT_ROOT:-}" ]]; then
   version_dir="$(prepare_visualization_version "${visualization_root}" "${visualization_version}")"
   history_root="${version_dir}/figures_history"
@@ -377,6 +432,35 @@ validate_bool "RUN_HISTORY_PLOTS" "${run_history_plots}"
 validate_bool "DELETE_ROLLOUTS_AFTER_PLOTTING" "${delete_rollouts_after_plotting}"
 validate_bool "REUSE_LEGACY_ROLLOUTS" "${reuse_legacy_rollouts}"
 validate_bool "PLOT_SKILL_HORIZON" "${plot_skill_horizon}"
+validate_bool "PLOT_SPECTRAL_HORIZON" "${plot_spectral_horizon}"
+
+if [[ "${plot_spectral_horizon}" == "true" ]]; then
+  read -r -a _spectral_modes_check <<< "${spectral_horizon_modes_text}"
+  read -r -a _spectral_eta_factors_check <<< "${spectral_eta_factors_text}"
+  if [[ "${#_spectral_modes_check[@]}" -eq 0 ]]; then
+    echo "Error: SPECTRAL_HORIZON_MODES must contain at least one mode when PLOT_SPECTRAL_HORIZON=true." >&2
+    exit 1
+  fi
+  if [[ "${#_spectral_eta_factors_check[@]}" -eq 0 ]]; then
+    echo "Error: SPECTRAL_ETA_FACTORS must contain at least one factor when PLOT_SPECTRAL_HORIZON=true." >&2
+    exit 1
+  fi
+  for _mode in "${_spectral_modes_check[@]}"; do
+    case "${_mode}" in
+      abs|positive) ;;
+      *)
+        echo "Error: invalid spectral horizon mode '${_mode}'. Allowed: abs positive" >&2
+        exit 1
+        ;;
+    esac
+  done
+  for _eta_factor in "${_spectral_eta_factors_check[@]}"; do
+    if ! awk "BEGIN { exit !(${_eta_factor} > 1.0) }"; then
+      echo "Error: each SPECTRAL_ETA_FACTORS entry must be greater than 1; got '${_eta_factor}'." >&2
+      exit 1
+    fi
+  done
+fi
 
 echo "=== Input paths ==="
 echo "Runs root: ${runs_root}"

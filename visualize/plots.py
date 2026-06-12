@@ -621,6 +621,104 @@ def plot_skill_horizon_vs_gamma(
     save_figure(fig, outdir / "skill_horizon_vs_gamma.png")
 
 
+def plot_spectral_horizon(
+    rollout_runs: Sequence[roll.RolloutRun],
+    outdir: Path,
+    spectra_method: str = "fft",
+    mode: str = "abs",
+    eta_factor: float = 2.0,
+    sht=None,
+) -> None:
+    """Plot spectral horizon versus wavenumber in a 2x2 layout."""
+    curves = roll.compute_spectral_horizon_curves(
+        rollout_runs,
+        spectra_method=spectra_method,
+        mode=mode,
+        eta_factor=eta_factor,
+        sht=sht,
+    )
+    keys = ["rotational", "divergent", "potential", "total"]
+    titles = ["Rotational", "Divergent", "Potential", "Total"]
+    fig, axes = plt.subplots(2, 2, figsize=(13.0, 9.8))
+    has_uncrossed = False
+
+    all_horizons = np.concatenate([
+        np.asarray(curve.horizons_by_key[key], dtype=float)
+        for curve in curves
+        for key in keys
+    ])
+    y_high = float(np.nanmax(all_horizons)) if all_horizons.size else 1.0
+
+    for idx, (ax, key, title) in enumerate(zip(axes.ravel(), keys, titles)):
+        for i, curve in enumerate(curves):
+            k = np.asarray(curve.wavenumbers, dtype=float)
+            horizons = np.asarray(curve.horizons_by_key[key], dtype=float)
+            crossed = np.asarray(curve.crossed_by_key[key], dtype=bool)
+            style = optimizer_line_style(curve.label, index=i, include_marker=len(k) < 40)
+            ax.semilogx(k, horizons, label=curve.label, **style)
+            uncrossed = ~crossed
+            if np.any(uncrossed):
+                has_uncrossed = True
+                ax.scatter(
+                    k[uncrossed],
+                    horizons[uncrossed],
+                    marker=style.get("marker", "o"),
+                    facecolors="none",
+                    edgecolors=style.get("color", "black"),
+                    linewidths=1.2,
+                    s=36,
+                    zorder=5,
+                )
+        ax.set_title(title, fontweight="bold")
+        if idx // 2 == 1:
+            ax.set_xlabel(r"Wavenumber $k$")
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.set_ylim(bottom=0.0, top=max(1.0, y_high * 1.05))
+        ax.grid(True, which="both", alpha=0.28)
+
+    factor_text = f"{eta_factor:g}"
+    if mode == "abs":
+        figure_title = rf"Spectral accuracy horizon ($\eta = \log({factor_text})$)"
+        subtitle = r"Crossing rule: $|\log(E_{\mathrm{pred}}/E_{\mathrm{true}})| > \eta$"
+        output_name = f"spectral_horizon_abs_factor{_filename_number(eta_factor)}.png"
+    else:
+        figure_title = rf"Spectral energy-growth horizon ($\eta = \log({factor_text})$)"
+        subtitle = r"Crossing rule: $\log(E_{\mathrm{pred}}/E_{\mathrm{true}}) > \eta$"
+        output_name = f"spectral_horizon_positive_factor{_filename_number(eta_factor)}.png"
+    fig.suptitle(figure_title, fontsize=13.2, fontweight="bold", y=0.972)
+    fig.text(0.5, 0.938, subtitle, ha="center", va="top", fontsize=10.0)
+    fig.text(
+        0.03,
+        0.5,
+        "Spectral horizon: first threshold-crossing step [rollout steps]",
+        rotation=90,
+        ha="center",
+        va="center",
+        fontsize=10.5,
+    )
+    if has_uncrossed:
+        fig.text(
+            0.99,
+            0.012,
+            "Open markers indicate no threshold crossing within the saved rollout horizon.",
+            ha="right",
+            va="bottom",
+            fontsize=8.5,
+            color="0.25",
+        )
+    handles, legend_labels = axes.ravel()[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        legend_labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.048),
+        ncol=min(4, len(legend_labels)),
+        frameon=False,
+    )
+    fig.tight_layout(rect=(0.06, 0.13, 1, 0.87))
+    save_figure(fig, outdir / output_name)
+
+
 def plot_forecast_runtime_ratio_bar(rollout_runs: Sequence[roll.RolloutRun], outdir: Path) -> None:
     """Plot ML-vs-non-ML solver runtime ratio from metrics.csv."""
     labels = [run.label for run in rollout_runs]
@@ -804,6 +902,12 @@ def _scaled_power_law(k: np.ndarray, spectrum: np.ndarray, exponent: float) -> n
     return scale * (k ** exponent)
 
 
+def _filename_number(value: float) -> str:
+    """Compact numeric text suitable for filenames."""
+    text = f"{value:g}"
+    return text.replace("-", "m").replace(".", "p")
+
+
 def _comparison_spectra(
     snapshots: Sequence[roll.FieldSnapshot],
     spectra_method: str,
@@ -824,22 +928,11 @@ def _comparison_spectra(
                 )
         if sht is None:
             raise ValueError("spherical combined spectra require an SHT object.")
-        truth_spectra = roll.compute_spherical_energy_spectra(snapshots[0].truth_fields, sht)
-        pred_spectra = [
-            (snap.label, roll.compute_spherical_energy_spectra(snap.prediction_fields, sht))
-            for snap in snapshots
-        ]
-    elif spectra_method == "fft":
-        # Keep the FFT branch available only when explicitly requested or when
-        # synthetic demo data cannot provide forecast.py's spherical transform.
-        # Real comparison runs should normally use the spherical branch above.
-        truth_spectra = roll.compute_simple_energy_spectra(snapshots[0].truth_fields)
-        pred_spectra = [
-            (snap.label, roll.compute_simple_energy_spectra(snap.prediction_fields))
-            for snap in snapshots
-        ]
-    else:
-        raise ValueError("spectra_method must be 'spherical' or 'fft'")
+    truth_spectra = roll.compute_energy_spectra(snapshots[0].truth_fields, spectra_method=spectra_method, sht=sht)
+    pred_spectra = [
+        (snap.label, roll.compute_energy_spectra(snap.prediction_fields, spectra_method=spectra_method, sht=sht))
+        for snap in snapshots
+    ]
     return truth_spectra, pred_spectra
 
 

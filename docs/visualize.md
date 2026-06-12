@@ -467,6 +467,7 @@ figures_forecast/
   forecast_accuracy_bar_l2.png
   forecast_runtime_ratio_bar.png
   skill_horizon_vs_gamma.png              # only with --skill_horizon
+  spectral_horizon_abs_factor2.png        # only with --spectral_horizon
   forecast_prediction_grid_vorticity_final.png
   forecast_error_grid_vorticity_final_signed.png
   forecast_spectra_final.png
@@ -492,7 +493,10 @@ figures_forecast/
 | `--error_metric` | no | `l2` | `loss`, `l1`, `l2`, `w11` | Scalar forecast metric for curves/bars. |
 | `--forecast_error_scale` | no | `linear` | `linear`, `log` | Y-axis scale for `forecast_error_curve_<metric>.png`. |
 | `--skill_horizon` | no | off | flag | Also write `skill_horizon_vs_gamma.png`, the first saved rollout step where the relative all-channel field error exceeds each gamma threshold. |
-| `--skill_horizon_gammas` | no | 36 values from `0.25` to `2.0` | floats | Gamma thresholds used by `--skill_horizon`. |
+| `--skill_horizon_gammas` | no | denser sweep below `1.0`, from `0.01` to `2.0` | floats | Gamma thresholds used by `--skill_horizon`. |
+| `--spectral_horizon` | no | off | flag | Also write a 2-by-2 spectral horizon diagnostic from saved rollout tensors. |
+| `--spectral_horizon_mode` | no | `abs` | `abs`, `positive` | `abs` detects any factor-threshold spectral mismatch; `positive` detects one-sided spectral energy growth only. |
+| `--spectral_eta_factor` | no | `2.0` | float > 1 | Multiplicative spectral threshold factor used by `--spectral_horizon`. |
 | `--error_mode` | no | `signed` | `signed`, `abs`, `squared` | Pointwise error map mode. |
 | `--summary_step` | no | `final` | `final`, `latest`, or integer | Rollout step loaded for grid and spectra plots. |
 | `--spherical_method` | no | `spherical` | `spherical`, `fft` | Spectral method for `forecast_spectra_final.png`. |
@@ -812,6 +816,51 @@ and positive percentage differences are shown consistently with a linear region
 around zero. The four panels share one robust symmetric y-limit.
 
 By default this figure uses spherical-harmonic spectra for real rollouts. Pass `--spherical_method fft` to generate the same combined plot with the grid FFT fallback instead.
+
+### 8. Spectral Horizon Plot
+
+```text
+spectral_horizon_abs_factor2.png
+spectral_horizon_positive_factor2.png
+```
+
+This optional plot is written only when `--spectral_horizon` is passed. It uses
+the same saved rollout snapshots and the same spectral diagnostic selected by
+`--spherical_method`.
+
+For each spectral component
+
+```math
+s\in\{\mathrm{rot},\mathrm{div},\mathrm{pot},\mathrm{total}\},
+```
+
+the code computes
+
+```math
+L_s(t,k)=\log\frac{E_{s,\mathrm{pred}}(t,k)+\varepsilon}{E_{s,\mathrm{true}}(t,k)+\varepsilon},
+```
+
+with a small positive `\varepsilon` for numerical stability, and converts
+`--spectral_eta_factor` into
+
+```math
+\eta=\log(\texttt{spectral\_eta\_factor}).
+```
+
+In `abs` mode the plotted horizon is
+
+```math
+T_{s,\mathrm{spec}}^{\mathrm{abs}}(k;\eta)=\min\{t:|L_s(t,k)|>\eta\},
+```
+
+and in `positive` mode it is
+
+```math
+T_{s,\mathrm{spec}}^{+}(k;\eta)=\min\{t:L_s(t,k)>\eta\}.
+```
+
+If a wavenumber never crosses within the saved rollout horizon, the plot keeps
+it at the maximum saved rollout step and marks it with an open marker.
 
 ---
 

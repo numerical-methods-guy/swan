@@ -114,6 +114,16 @@ class SkillHorizonCurve:
     crossed: np.ndarray
 
 
+@dataclass
+class SpectralHorizonCurve:
+    """Spectral horizon curves for one optimizer label."""
+
+    label: str
+    wavenumbers: np.ndarray
+    horizons_by_key: Dict[str, np.ndarray]
+    crossed_by_key: Dict[str, np.ndarray]
+
+
 # ---------------------------------------------------------------------------
 # Checkpoint discovery
 # ---------------------------------------------------------------------------
@@ -676,7 +686,13 @@ def compute_skill_horizon_curves(
 def _validate_skill_gammas(gammas: Optional[Sequence[float]]) -> np.ndarray:
     """Return sorted positive gamma thresholds."""
     if gammas is None:
-        values = np.linspace(0.25, 2.0, 36)
+        values = np.array([
+            0.01, 0.05, 0.10, 0.15, 0.20, 0.25,
+            0.30, 0.35, 0.40, 0.45, 0.50, 0.60,
+            0.70, 0.80, 0.90, 1.00, 1.10, 1.20,
+            1.30, 1.40, 1.50, 1.60, 1.70, 1.80,
+            1.90, 2.00,
+        ], dtype=float)
     else:
         values = np.asarray(gammas, dtype=float)
     values = np.unique(values)
@@ -757,6 +773,156 @@ def _preferred_ic_step_files(rollout_dir: Path, kind: str, suffix: str) -> Dict[
         if width == preferred_width:
             grouped.setdefault(ic, {})[step] = path
     return grouped
+
+
+def compute_spectral_horizon_curves(
+    rollout_runs: Sequence[RolloutRun],
+    spectra_method: str = "fft",
+    mode: str = "abs",
+    eta_factor: float = 2.0,
+    sht=None,
+) -> List[SpectralHorizonCurve]:
+    """Compute spectral horizon curves from saved rollout tensors."""
+    mode_name, eta = _validate_spectral_horizon_args(mode, eta_factor)
+    curves: List[SpectralHorizonCurve] = []
+    for run in rollout_runs:
+        per_ic = _spectral_horizons_by_ic(
+            run.rollout_dir,
+            spectra_method=spectra_method,
+            mode=mode_name,
+            eta=eta,
+            sht=sht,
+        )
+        if not per_ic:
+            raise FileNotFoundError(f"Could not find prediction/truth .pt files in {run.rollout_dir}")
+
+        min_len = min(len(item["wavenumbers"]) for item in per_ic.values())
+        wavenumbers = np.asarray(next(iter(per_ic.values()))["wavenumbers"][:min_len], dtype=float)
+        horizons_by_key: Dict[str, np.ndarray] = {}
+        crossed_by_key: Dict[str, np.ndarray] = {}
+        for key in ("rotational", "divergent", "potential", "total"):
+            horizon_stack = np.vstack([np.asarray(item["horizons_by_key"][key][:min_len], dtype=float) for item in per_ic.values()])
+            crossed_stack = np.vstack([np.asarray(item["crossed_by_key"][key][:min_len], dtype=bool) for item in per_ic.values()])
+            horizons_by_key[key] = np.nanmedian(horizon_stack, axis=0)
+            crossed_by_key[key] = np.mean(crossed_stack, axis=0) >= 0.5
+        curves.append(
+            SpectralHorizonCurve(
+                label=run.label,
+                wavenumbers=wavenumbers,
+                horizons_by_key=horizons_by_key,
+                crossed_by_key=crossed_by_key,
+            )
+        )
+    return curves
+
+
+def _validate_spectral_horizon_args(mode: str, eta_factor: float) -> Tuple[str, float]:
+    """Validate spectral horizon options and return the log-threshold eta."""
+    if mode not in {"abs", "positive"}:
+        raise ValueError("spectral horizon mode must be 'abs' or 'positive'.")
+    if not np.isfinite(eta_factor) or eta_factor <= 1.0:
+        raise ValueError("spectral_eta_factor must be a finite number greater than 1.")
+    return mode, float(np.log(eta_factor))
+
+
+def _spectral_horizons_by_ic(
+    rollout_dir: str | Path,
+    spectra_method: str,
+    mode: str,
+    eta: float,
+    sht=None,
+) -> Dict[int, Dict[str, object]]:
+    """Compute per-IC spectral horizons from saved prediction/truth tensors."""
+    rollout_dir = Path(rollout_dir)
+    pred_files = _preferred_ic_step_files(rollout_dir, "prediction", ".pt")
+    truth_files = _preferred_ic_step_files(rollout_dir, "truth", ".pt")
+    per_ic: Dict[int, Dict[str, object]] = {}
+
+    for ic in sorted(set(pred_files) & set(truth_files)):
+        common_steps = sorted(set(pred_files[ic]) & set(truth_files[ic]))
+        if not common_steps:
+            continue
+
+        truth_spectra_by_step = []
+        pred_spectra_by_step = []
+        for step in common_steps:
+            prediction = load_field_pt(pred_files[ic][step])
+            truth = load_field_pt(truth_files[ic][step])
+            pred_spectra_by_step.append(compute_energy_spectra(prediction, spectra_method=spectra_method, sht=sht))
+            truth_spectra_by_step.append(compute_energy_spectra(truth, spectra_method=spectra_method, sht=sht))
+
+        min_len = min(len(np.asarray(spec["wavenumbers"])) for spec in truth_spectra_by_step)
+        if min_len <= 1:
+            continue
+
+        wavenumbers = np.asarray(truth_spectra_by_step[0]["wavenumbers"], dtype=float)[1:min_len]
+        horizons_by_key: Dict[str, np.ndarray] = {}
+        crossed_by_key: Dict[str, np.ndarray] = {}
+        for key in ("rotational", "divergent", "potential", "total"):
+            log_ratio_steps = []
+            for pred_spectra, truth_spectra in zip(pred_spectra_by_step, truth_spectra_by_step):
+                pred_values = np.asarray(pred_spectra[key], dtype=float)[1:min_len]
+                truth_values = np.asarray(truth_spectra[key], dtype=float)[1:min_len]
+                log_ratio_steps.append(_spectral_log_ratio(pred_values, truth_values))
+            log_ratio = np.vstack(log_ratio_steps)
+            horizons, crossed = _spectral_horizon_for_log_ratio(
+                np.asarray(common_steps, dtype=float),
+                log_ratio,
+                eta=eta,
+                mode=mode,
+            )
+            horizons_by_key[key] = horizons
+            crossed_by_key[key] = crossed
+
+        per_ic[ic] = {
+            "wavenumbers": wavenumbers,
+            "horizons_by_key": horizons_by_key,
+            "crossed_by_key": crossed_by_key,
+        }
+    return per_ic
+
+
+def _spectral_log_ratio(prediction: np.ndarray, truth: np.ndarray) -> np.ndarray:
+    """Return log spectral energy ratio with a small positive floor."""
+    prediction = np.asarray(prediction, dtype=float)
+    truth = np.asarray(truth, dtype=float)
+    finite = np.concatenate([
+        np.abs(prediction[np.isfinite(prediction)]),
+        np.abs(truth[np.isfinite(truth)]),
+    ])
+    eps = max(float(np.nanmax(finite)) * 1e-12, 1e-30) if finite.size else 1e-30
+    return np.log((prediction + eps) / (truth + eps))
+
+
+def _spectral_horizon_for_log_ratio(
+    steps: np.ndarray,
+    log_ratio: np.ndarray,
+    eta: float,
+    mode: str,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return first saved rollout step where the spectral threshold is crossed."""
+    if log_ratio.ndim != 2:
+        raise ValueError("Expected log_ratio with shape (n_steps, n_wavenumbers).")
+    if steps.size != log_ratio.shape[0]:
+        raise ValueError("steps length must match the first log_ratio dimension.")
+    max_step = float(np.max(steps))
+    horizons = np.full(log_ratio.shape[1], max_step, dtype=float)
+    crossed = np.zeros(log_ratio.shape[1], dtype=bool)
+    for idx in range(log_ratio.shape[1]):
+        values = log_ratio[:, idx]
+        valid = ~np.isnan(values)
+        if not np.any(valid):
+            continue
+        valid_steps = steps[valid]
+        valid_values = values[valid]
+        if mode == "abs":
+            hit_indices = np.flatnonzero(np.abs(valid_values) > eta)
+        else:
+            hit_indices = np.flatnonzero(valid_values > eta)
+        if hit_indices.size:
+            horizons[idx] = float(valid_steps[int(hit_indices[0])])
+            crossed[idx] = True
+    return horizons, crossed
 
 
 def _path_step(path: Path) -> Optional[int]:
@@ -1034,6 +1200,17 @@ def compute_spherical_energy_spectra(fields: np.ndarray, sht) -> Dict[str, np.nd
     if tensor.ndim == 3:
         tensor = tensor.unsqueeze(0)
     return forecast.compute_energy_spectra(tensor, sht)
+
+
+def compute_energy_spectra(fields: np.ndarray, spectra_method: str = "fft", sht=None) -> Dict[str, np.ndarray]:
+    """Dispatch to the configured spectral diagnostic."""
+    if spectra_method == "spherical":
+        if sht is None:
+            raise ValueError("sht is required when spectra_method='spherical'.")
+        return compute_spherical_energy_spectra(fields, sht)
+    if spectra_method == "fft":
+        return compute_simple_energy_spectra(fields)
+    raise ValueError(f"Unknown spectra_method {spectra_method!r}.")
 
 
 def radial_power_spectrum(field: np.ndarray) -> np.ndarray:

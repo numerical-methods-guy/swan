@@ -26,51 +26,92 @@ trap 'echo "Error at ${BASH_SOURCE[0]}:${LINENO}: ${BASH_COMMAND}" >&2' ERR
 # ---------------------------------------------------------------------------
 # User settings
 # ---------------------------------------------------------------------------
+# Master on/off switch for the visualization phase in this wrapper.
 # This grouped wrapper only visualizes saved swan_checkpoints models.
 run_visualization=true
 
+# Grid resolution used when visualize forecast needs nlat/nlon.
 resolution_nlat=128
 resolution_nlon=256
 
 # overwrite_visualization_outputs=false preserves existing visualization runs by
 # creating the next version_N folder. When true, the wrapper rewrites the latest
 # existing version_N folder, or creates version_0 if no version exists yet.
-overwrite_visualization_outputs=true
+overwrite_visualization_outputs=false
 
 # Visualization settings passed to visualize_two_group_optimizers.sh for this wrapper
 # run. Direct runs of visualize_two_group_optimizers.sh keep that file's defaults.
+# Folder containing checkpoint runs such as swan_checkpoints/logs/adam/version_0.
 visualization_runs_root="./swan_checkpoints/logs"
+# YAML config used by visualize forecast for dataset/model metadata.
 visualization_config="./swan_checkpoints/config_paradis.yaml"
+# Forecast field to show in spatial plots, for example vorticity.
 visualization_channel="vorticity"
+# Axis scaling for history plots: log or linear.
 visualization_history_scale="log"
+# Axis scaling for forecast L2 error plots: log or linear.
 visualization_forecast_error_scale="log"
+# When true, add the reliability curve gamma -> T_skill(gamma).
 visualization_skill_horizon=true
+# Optional explicit gamma list for the skill-horizon plot.
+# Leave empty to use the forecast command's default gamma sweep.
 visualization_skill_horizon_gammas=""
+# When true, add spectral-horizon plots.
+visualization_spectral_horizon=true
+# Spectral-horizon modes to generate: abs and/or positive.
+visualization_spectral_horizon_modes=(abs positive)
+# Threshold factors for spectral horizon. Each value eta_factor produces plots
+# using eta = log(eta_factor).
+visualization_spectral_eta_factors=(1.05 1.1 1.25 1.5 2 5)
+# Total autoregressive rollout length in model steps.
 visualization_autoreg_steps=250
+# Save forecast outputs every N rollout steps.
 visualization_output_freq=10
+# When true, also run training-history plots for each group.
 run_history_plots=false
+# When true, delete saved rollout .pt files after figures/animations are made.
 delete_rollouts_after_plotting=true
 
-# Available visualization groups:
-#   all_optimizers:
-#     Adam, AdamW, MUD, MUD-new, Muon, Muon-new, SGD
-#   without_spectral_blow_up:
-#     Adam, AdamW, MUD-new, Muon-new, SGD
-#     excludes MUD and Muon
-#   without_spatial_blow_up:
-#     Adam, AdamW, MUD, Muon-new, SGD
-#     excludes MUD-new and Muon
-#   stable_core:
-#     Adam, AdamW, Muon-new, SGD
-#     excludes MUD, MUD-new, and Muon
-#   custom:
-#     uses CUSTOM_OPTIMIZERS and CUSTOM_LABELS below
-VIS_GROUPS=(all_optimizers stable_core)
+# Available visualization groups.
+# - Every *_OPTIMIZERS entry must use the exact checkpoint subfolder names under
+#   swan_checkpoints/logs, for example: adam, mud_new, muon_new.
+# - Every *_LABELS entry is only for plot legends/titles and can be written in a
+#   more readable form, for example: Adam, MUD-new, Muon-new.
+# - Keep each *_OPTIMIZERS list aligned with its matching *_LABELS list.
+# - all_optimizers uses the full list defined by ALL_OPTIMIZERS / ALL_LABELS below.
+# - custom means: render the subset defined by CUSTOM_OPTIMIZERS / CUSTOM_LABELS below.
+# - VIS_GROUPS chooses which named groups this wrapper will render.
+VIS_GROUPS=(all_optimizers custom)
+
+# Group: all_optimizers
+ALL_OPTIMIZERS=(adam adamw mud mud_new muon muon_new sgd)
+ALL_LABELS=(Adam AdamW MUD MUD-new Muon Muon-new SGD)
+
+# Group: without_spectral_blow_up
+# Excludes MUD and Muon.
+WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS=(adam adamw mud_new muon_new sgd)
+WITHOUT_SPECTRAL_BLOW_UP_LABELS=(Adam AdamW MUD-new Muon-new SGD)
+
+# Group: without_spatial_blow_up
+# Excludes MUD-new and Muon.
+WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS=(adam adamw mud muon_new sgd)
+WITHOUT_SPATIAL_BLOW_UP_LABELS=(Adam AdamW MUD Muon-new SGD)
+
+# Group: stable_core
+# Excludes MUD, MUD-new, and Muon.
+STABLE_CORE_OPTIMIZERS=(adam adamw muon_new sgd)
+STABLE_CORE_LABELS=(Adam AdamW Muon-new SGD)
+
+# Group: custom
+# Used only when VIS_GROUPS includes the literal group name "custom".
+# Put the exact folder names you want in CUSTOM_OPTIMIZERS and the plot labels
+# you want in CUSTOM_LABELS.
 CUSTOM_OPTIMIZERS=(adam adamw)
 CUSTOM_LABELS=(Adam AdamW)
 
-# Animation playback mode: standard, smooth, or slow. Smooth uses higher FPS;
-# slow chooses FPS from autoreg_steps/output_freq for audience-friendly playback.
+# Animation playback mode for generated GIFs: standard, smooth, or slow.
+# Smooth uses higher FPS; slow chooses FPS from autoreg_steps/output_freq for
+# audience-friendly playback.
 visualization_animation_pacing="slow"
 
 # Legacy ./rollout_results reuse is disabled by default so cluster outputs stay
@@ -80,7 +121,9 @@ reuse_legacy_rollouts=false
 # Versioned visualization outputs. With visualization_version="auto",
 # overwrite_visualization_outputs controls whether the wrapper creates the next
 # version_N or rewrites the latest existing version_N.
-visualization_root="./visualization_runs_two_groups"
+# Root folder that will contain version_0, version_1, ... for this wrapper.
+visualization_root="./forecast_group_visualizations"
+# Output version name. Use "auto" for automatic version_N management.
 visualization_version="auto"
 
 # Optional environment setup. Put module/conda commands here if needed, e.g.:
@@ -106,11 +149,22 @@ print_settings() {
   echo "visualization_forecast_error_scale=${visualization_forecast_error_scale}"
   echo "visualization_skill_horizon=${visualization_skill_horizon}"
   echo "visualization_skill_horizon_gammas=${visualization_skill_horizon_gammas:-<default>}"
+  echo "visualization_spectral_horizon=${visualization_spectral_horizon}"
+  echo "visualization_spectral_horizon_modes=${visualization_spectral_horizon_modes[*]}"
+  echo "visualization_spectral_eta_factors=${visualization_spectral_eta_factors[*]}"
   echo "visualization_autoreg_steps=${visualization_autoreg_steps}"
   echo "visualization_output_freq=${visualization_output_freq}"
   echo "run_history_plots=${run_history_plots}"
   echo "delete_rollouts_after_plotting=${delete_rollouts_after_plotting}"
   echo "VIS_GROUPS=${VIS_GROUPS[*]}"
+  echo "ALL_OPTIMIZERS=${ALL_OPTIMIZERS[*]}"
+  echo "ALL_LABELS=${ALL_LABELS[*]}"
+  echo "WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS=${WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS[*]}"
+  echo "WITHOUT_SPECTRAL_BLOW_UP_LABELS=${WITHOUT_SPECTRAL_BLOW_UP_LABELS[*]}"
+  echo "WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS=${WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS[*]}"
+  echo "WITHOUT_SPATIAL_BLOW_UP_LABELS=${WITHOUT_SPATIAL_BLOW_UP_LABELS[*]}"
+  echo "STABLE_CORE_OPTIMIZERS=${STABLE_CORE_OPTIMIZERS[*]}"
+  echo "STABLE_CORE_LABELS=${STABLE_CORE_LABELS[*]}"
   echo "CUSTOM_OPTIMIZERS=${CUSTOM_OPTIMIZERS[*]}"
   echo "CUSTOM_LABELS=${CUSTOM_LABELS[*]}"
   echo "visualization_animation_pacing=${visualization_animation_pacing}"
@@ -148,7 +202,7 @@ run_visualization_phase() {
 
   echo "=== Visualization phase ==="
   echo "Visualization version directory: ${version_dir}"
-  printf '%s\n' "${clear_answer}" | env RUNS_ROOT="${visualization_runs_root}" VIS_CONFIG="${visualization_config}" VIS_CHANNEL="${visualization_channel}" HISTORY_SCALE="${visualization_history_scale}" FORECAST_ERROR_SCALE="${visualization_forecast_error_scale}" PLOT_SKILL_HORIZON="${visualization_skill_horizon}" SKILL_HORIZON_GAMMAS="${visualization_skill_horizon_gammas}" AUTOREG_STEPS="${visualization_autoreg_steps}" OUTPUT_FREQ="${visualization_output_freq}" RUN_HISTORY_PLOTS="${run_history_plots}" DELETE_ROLLOUTS_AFTER_PLOTTING="${delete_rollouts_after_plotting}" VIS_GROUPS="${groups}" CUSTOM_OPTIMIZERS="${CUSTOM_OPTIMIZERS[*]}" CUSTOM_LABELS="${CUSTOM_LABELS[*]}" ANIMATION_PACING="${visualization_animation_pacing}" REUSE_LEGACY_ROLLOUTS="${reuse_legacy_rollouts}" VIS_NLAT="${resolution_nlat}" VIS_NLON="${resolution_nlon}" FIGURES_HISTORY_ROOT="${version_dir}/figures_history" FIGURES_FORECAST_ROOT="${version_dir}/figures_forecast" ROLLOUT_ROOT="${version_dir}/rollout_results" bash visualize_two_group_optimizers.sh
+  printf '%s\n' "${clear_answer}" | env RUNS_ROOT="${visualization_runs_root}" VIS_CONFIG="${visualization_config}" VIS_CHANNEL="${visualization_channel}" HISTORY_SCALE="${visualization_history_scale}" FORECAST_ERROR_SCALE="${visualization_forecast_error_scale}" PLOT_SKILL_HORIZON="${visualization_skill_horizon}" SKILL_HORIZON_GAMMAS="${visualization_skill_horizon_gammas}" PLOT_SPECTRAL_HORIZON="${visualization_spectral_horizon}" SPECTRAL_HORIZON_MODES="${visualization_spectral_horizon_modes[*]}" SPECTRAL_ETA_FACTORS="${visualization_spectral_eta_factors[*]}" AUTOREG_STEPS="${visualization_autoreg_steps}" OUTPUT_FREQ="${visualization_output_freq}" RUN_HISTORY_PLOTS="${run_history_plots}" DELETE_ROLLOUTS_AFTER_PLOTTING="${delete_rollouts_after_plotting}" VIS_GROUPS="${groups}" ALL_OPTIMIZERS="${ALL_OPTIMIZERS[*]}" ALL_LABELS="${ALL_LABELS[*]}" WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS="${WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS[*]}" WITHOUT_SPECTRAL_BLOW_UP_LABELS="${WITHOUT_SPECTRAL_BLOW_UP_LABELS[*]}" WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS="${WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS[*]}" WITHOUT_SPATIAL_BLOW_UP_LABELS="${WITHOUT_SPATIAL_BLOW_UP_LABELS[*]}" STABLE_CORE_OPTIMIZERS="${STABLE_CORE_OPTIMIZERS[*]}" STABLE_CORE_LABELS="${STABLE_CORE_LABELS[*]}" CUSTOM_OPTIMIZERS="${CUSTOM_OPTIMIZERS[*]}" CUSTOM_LABELS="${CUSTOM_LABELS[*]}" ANIMATION_PACING="${visualization_animation_pacing}" REUSE_LEGACY_ROLLOUTS="${reuse_legacy_rollouts}" VIS_NLAT="${resolution_nlat}" VIS_NLON="${resolution_nlon}" FIGURES_HISTORY_ROOT="${version_dir}/figures_history" FIGURES_FORECAST_ROOT="${version_dir}/figures_forecast" ROLLOUT_ROOT="${version_dir}/rollout_results" bash visualize_two_group_optimizers.sh
 }
 
 prepare_visualization_version() {
@@ -253,11 +307,22 @@ visualization_history_scale=${visualization_history_scale}
 visualization_forecast_error_scale=${visualization_forecast_error_scale}
 visualization_skill_horizon=${visualization_skill_horizon}
 visualization_skill_horizon_gammas=${visualization_skill_horizon_gammas:-<default>}
+visualization_spectral_horizon=${visualization_spectral_horizon}
+visualization_spectral_horizon_modes=${visualization_spectral_horizon_modes[*]}
+visualization_spectral_eta_factors=${visualization_spectral_eta_factors[*]}
 visualization_autoreg_steps=${visualization_autoreg_steps}
 visualization_output_freq=${visualization_output_freq}
 run_history_plots=${run_history_plots}
 delete_rollouts_after_plotting=${delete_rollouts_after_plotting}
 VIS_GROUPS=${VIS_GROUPS[*]}
+ALL_OPTIMIZERS=${ALL_OPTIMIZERS[*]}
+ALL_LABELS=${ALL_LABELS[*]}
+WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS=${WITHOUT_SPECTRAL_BLOW_UP_OPTIMIZERS[*]}
+WITHOUT_SPECTRAL_BLOW_UP_LABELS=${WITHOUT_SPECTRAL_BLOW_UP_LABELS[*]}
+WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS=${WITHOUT_SPATIAL_BLOW_UP_OPTIMIZERS[*]}
+WITHOUT_SPATIAL_BLOW_UP_LABELS=${WITHOUT_SPATIAL_BLOW_UP_LABELS[*]}
+STABLE_CORE_OPTIMIZERS=${STABLE_CORE_OPTIMIZERS[*]}
+STABLE_CORE_LABELS=${STABLE_CORE_LABELS[*]}
 CUSTOM_OPTIMIZERS=${CUSTOM_OPTIMIZERS[*]}
 CUSTOM_LABELS=${CUSTOM_LABELS[*]}
 visualization_animation_pacing=${visualization_animation_pacing}
@@ -271,6 +336,7 @@ EOF
 validate_bool "run_visualization" "${run_visualization}"
 validate_bool "overwrite_visualization_outputs" "${overwrite_visualization_outputs}"
 validate_bool "visualization_skill_horizon" "${visualization_skill_horizon}"
+validate_bool "visualization_spectral_horizon" "${visualization_spectral_horizon}"
 validate_bool "run_history_plots" "${run_history_plots}"
 validate_bool "delete_rollouts_after_plotting" "${delete_rollouts_after_plotting}"
 validate_bool "reuse_legacy_rollouts" "${reuse_legacy_rollouts}"
