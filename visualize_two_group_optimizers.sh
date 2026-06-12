@@ -67,6 +67,33 @@ validate_bool() {
   esac
 }
 
+resolve_config_path() {
+  local requested_path="$1"
+  local input_root
+  local -a candidates=()
+  local candidate
+
+  if [[ -f "${requested_path}" ]]; then
+    printf '%s\n' "${requested_path}"
+    return 0
+  fi
+
+  input_root="$(dirname "${runs_root}")"
+  candidates=(
+    "${input_root}/config_paradis.yaml"
+    "./config_paradis.yaml"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 animation_fps_for_pacing() {
   local frame_count=$(( (autoreg_steps + output_freq - 1) / output_freq + 1 ))
   local fps
@@ -113,9 +140,13 @@ check_inputs() {
   local missing=0
   local -a runs_to_check=()
   local group
+  local resolved_config_path
 
-  if [[ ! -f "${config_path}" ]]; then
+  if resolved_config_path="$(resolve_config_path "${config_path}")"; then
+    config_path="${resolved_config_path}"
+  else
     echo "Error: config does not exist: ${config_path}" >&2
+    echo "Tried the requested path, ${runs_root%/*}/config_paradis.yaml, and ./config_paradis.yaml." >&2
     missing=1
   fi
 
@@ -255,6 +286,7 @@ run_forecast_group() {
   local -a skill_gamma_args=()
   local -a spectral_modes=()
   local -a spectral_eta_factors=()
+  local forecast_log
   local mode
   local eta_factor
   local first_forecast=true
@@ -310,7 +342,22 @@ run_forecast_group() {
       else
         forecast_cmd+=(--runs "${runs_ref[@]}")
       fi
-      "${forecast_cmd[@]}"
+      if [[ "${first_forecast}" == "true" ]]; then
+        "${forecast_cmd[@]}"
+      else
+        forecast_log="$(mktemp)"
+        "${forecast_cmd[@]}" > "${forecast_log}"
+        awk '
+          /^Saved: / {
+            if ($0 ~ /spectral_horizon_/) {
+              print
+            }
+            next
+          }
+          { print }
+        ' "${forecast_log}"
+        rm -f "${forecast_log}"
+      fi
       first_forecast=false
     done
   done

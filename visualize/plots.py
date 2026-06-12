@@ -641,6 +641,7 @@ def plot_spectral_horizon(
     titles = ["Rotational", "Divergent", "Potential", "Total"]
     fig, axes = plt.subplots(2, 2, figsize=(13.0, 9.8))
     has_uncrossed = False
+    has_nonfinite = False
 
     all_horizons = np.concatenate([
         np.asarray(curve.horizons_by_key[key], dtype=float)
@@ -654,6 +655,7 @@ def plot_spectral_horizon(
             k = np.asarray(curve.wavenumbers, dtype=float)
             horizons = np.asarray(curve.horizons_by_key[key], dtype=float)
             crossed = np.asarray(curve.crossed_by_key[key], dtype=bool)
+            crossed_from_nonfinite = np.asarray(curve.nonfinite_by_key[key], dtype=bool)
             style = optimizer_line_style(curve.label, index=i, include_marker=len(k) < 40)
             ax.semilogx(k, horizons, label=curve.label, **style)
             uncrossed = ~crossed
@@ -668,6 +670,17 @@ def plot_spectral_horizon(
                     linewidths=1.2,
                     s=36,
                     zorder=5,
+                )
+            if np.any(crossed_from_nonfinite):
+                has_nonfinite = True
+                ax.scatter(
+                    k[crossed_from_nonfinite],
+                    horizons[crossed_from_nonfinite],
+                    marker="x",
+                    color=style.get("color", "black"),
+                    linewidths=1.4,
+                    s=42,
+                    zorder=6,
                 )
         ax.set_title(title, fontweight="bold")
         if idx // 2 == 1:
@@ -696,11 +709,16 @@ def plot_spectral_horizon(
         va="center",
         fontsize=10.5,
     )
+    note_parts = []
     if has_uncrossed:
+        note_parts.append("Open markers indicate no threshold crossing within the saved rollout horizon.")
+    if has_nonfinite:
+        note_parts.append("x markers indicate the first crossing came from a non-finite spectral ratio.")
+    if note_parts:
         fig.text(
             0.99,
             0.012,
-            "Open markers indicate no threshold crossing within the saved rollout horizon.",
+            " ".join(note_parts),
             ha="right",
             va="bottom",
             fontsize=8.5,

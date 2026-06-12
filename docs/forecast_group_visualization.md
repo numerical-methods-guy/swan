@@ -37,6 +37,22 @@ visualization_runs_root="./swan_checkpoints/logs"
 visualization_config="./swan_checkpoints/config_paradis.yaml"
 ```
 
+For the config file, the wrapper first tries the exact
+`visualization_config` path. If that file is missing, it then falls back to:
+
+```text
+dirname(visualization_runs_root)/config_paradis.yaml
+./config_paradis.yaml
+```
+
+So with the default `visualization_runs_root="./swan_checkpoints/logs"`, the
+helper will accept either:
+
+```text
+./swan_checkpoints/config_paradis.yaml
+./config_paradis.yaml
+```
+
 ## Optimizer Groups
 
 The script always uses these groups:

@@ -122,6 +122,7 @@ class SpectralHorizonCurve:
     wavenumbers: np.ndarray
     horizons_by_key: Dict[str, np.ndarray]
     crossed_by_key: Dict[str, np.ndarray]
+    nonfinite_by_key: Dict[str, np.ndarray]
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +789,7 @@ def compute_spectral_horizon_curves(
     for run in rollout_runs:
         per_ic = _spectral_horizons_by_ic(
             run.rollout_dir,
+            run_label=run.label,
             spectra_method=spectra_method,
             mode=mode_name,
             eta=eta,
@@ -800,17 +802,21 @@ def compute_spectral_horizon_curves(
         wavenumbers = np.asarray(next(iter(per_ic.values()))["wavenumbers"][:min_len], dtype=float)
         horizons_by_key: Dict[str, np.ndarray] = {}
         crossed_by_key: Dict[str, np.ndarray] = {}
+        nonfinite_by_key: Dict[str, np.ndarray] = {}
         for key in ("rotational", "divergent", "potential", "total"):
             horizon_stack = np.vstack([np.asarray(item["horizons_by_key"][key][:min_len], dtype=float) for item in per_ic.values()])
             crossed_stack = np.vstack([np.asarray(item["crossed_by_key"][key][:min_len], dtype=bool) for item in per_ic.values()])
+            nonfinite_stack = np.vstack([np.asarray(item["nonfinite_by_key"][key][:min_len], dtype=bool) for item in per_ic.values()])
             horizons_by_key[key] = np.nanmedian(horizon_stack, axis=0)
             crossed_by_key[key] = np.mean(crossed_stack, axis=0) >= 0.5
+            nonfinite_by_key[key] = np.mean(nonfinite_stack, axis=0) >= 0.5
         curves.append(
             SpectralHorizonCurve(
                 label=run.label,
                 wavenumbers=wavenumbers,
                 horizons_by_key=horizons_by_key,
                 crossed_by_key=crossed_by_key,
+                nonfinite_by_key=nonfinite_by_key,
             )
         )
     return curves
@@ -827,6 +833,7 @@ def _validate_spectral_horizon_args(mode: str, eta_factor: float) -> Tuple[str, 
 
 def _spectral_horizons_by_ic(
     rollout_dir: str | Path,
+    run_label: str,
     spectra_method: str,
     mode: str,
     eta: float,
@@ -858,6 +865,7 @@ def _spectral_horizons_by_ic(
         wavenumbers = np.asarray(truth_spectra_by_step[0]["wavenumbers"], dtype=float)[1:min_len]
         horizons_by_key: Dict[str, np.ndarray] = {}
         crossed_by_key: Dict[str, np.ndarray] = {}
+        nonfinite_by_key: Dict[str, np.ndarray] = {}
         for key in ("rotational", "divergent", "potential", "total"):
             log_ratio_steps = []
             for pred_spectra, truth_spectra in zip(pred_spectra_by_step, truth_spectra_by_step):
@@ -865,19 +873,23 @@ def _spectral_horizons_by_ic(
                 truth_values = np.asarray(truth_spectra[key], dtype=float)[1:min_len]
                 log_ratio_steps.append(_spectral_log_ratio(pred_values, truth_values))
             log_ratio = np.vstack(log_ratio_steps)
-            horizons, crossed = _spectral_horizon_for_log_ratio(
+            horizons, crossed, crossed_from_nonfinite = _spectral_horizon_for_log_ratio(
                 np.asarray(common_steps, dtype=float),
                 log_ratio,
                 eta=eta,
                 mode=mode,
+                run_label=run_label,
+                component=key,
             )
             horizons_by_key[key] = horizons
             crossed_by_key[key] = crossed
+            nonfinite_by_key[key] = crossed_from_nonfinite
 
         per_ic[ic] = {
             "wavenumbers": wavenumbers,
             "horizons_by_key": horizons_by_key,
             "crossed_by_key": crossed_by_key,
+            "nonfinite_by_key": nonfinite_by_key,
         }
     return per_ic
 
@@ -899,7 +911,9 @@ def _spectral_horizon_for_log_ratio(
     log_ratio: np.ndarray,
     eta: float,
     mode: str,
-) -> Tuple[np.ndarray, np.ndarray]:
+    run_label: str,
+    component: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return first saved rollout step where the spectral threshold is crossed."""
     if log_ratio.ndim != 2:
         raise ValueError("Expected log_ratio with shape (n_steps, n_wavenumbers).")
@@ -908,21 +922,31 @@ def _spectral_horizon_for_log_ratio(
     max_step = float(np.max(steps))
     horizons = np.full(log_ratio.shape[1], max_step, dtype=float)
     crossed = np.zeros(log_ratio.shape[1], dtype=bool)
+    crossed_from_nonfinite = np.zeros(log_ratio.shape[1], dtype=bool)
+    nonfinite_mask = ~np.isfinite(log_ratio)
+    if np.any(nonfinite_mask):
+        warned_steps = steps[np.any(nonfinite_mask, axis=1)]
+        warned_text = ", ".join(str(int(step)) for step in warned_steps[:8])
+        if warned_steps.size > 8:
+            warned_text += ", ..."
+        print(
+            "Warning: non-finite spectral log ratio detected for "
+            f"label={run_label}, component={component}, steps=[{warned_text}]. "
+            "Treating non-finite values as threshold crossings."
+        )
     for idx in range(log_ratio.shape[1]):
         values = log_ratio[:, idx]
-        valid = ~np.isnan(values)
-        if not np.any(valid):
-            continue
-        valid_steps = steps[valid]
-        valid_values = values[valid]
         if mode == "abs":
-            hit_indices = np.flatnonzero(np.abs(valid_values) > eta)
+            bad = (~np.isfinite(values)) | (np.abs(values) > eta)
         else:
-            hit_indices = np.flatnonzero(valid_values > eta)
+            bad = (~np.isfinite(values)) | (values > eta)
+        hit_indices = np.flatnonzero(bad)
         if hit_indices.size:
-            horizons[idx] = float(valid_steps[int(hit_indices[0])])
+            hit_index = int(hit_indices[0])
+            horizons[idx] = float(steps[hit_index])
             crossed[idx] = True
-    return horizons, crossed
+            crossed_from_nonfinite[idx] = not np.isfinite(values[hit_index])
+    return horizons, crossed, crossed_from_nonfinite
 
 
 def _path_step(path: Path) -> Optional[int]:
