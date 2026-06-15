@@ -84,7 +84,7 @@ def resource_axis_name(resource: str) -> str:
     if resource == "step":
         return "global training step"
     if resource == "time":
-        return "relative wall-clock time (s)"
+        return "wall-clock time (s)"
     return resource
 
 
@@ -374,21 +374,51 @@ def plot_history_learning_curve(
     metric_name = hist.filename_metric_name(stage, error_metric)
     effective_yscale = "linear" if stage == "training" else yscale
 
-    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    show_training_time_zoom = stage == "training" and resource == "time"
+    if show_training_time_zoom:
+        fig, axes = plt.subplots(
+            2,
+            1,
+            figsize=(8.5, 9.5),
+            gridspec_kw={"height_ratios": [1.15, 1.0]},
+        )
+        ax, zoom_ax = axes
+    else:
+        fig, ax = plt.subplots(figsize=(8.5, 5.5))
+        zoom_ax = None
+
     for i, (label, series) in enumerate(series_by_label.items()):
         x = series.step if resource == "step" else series.relative_time_sec
         style = history_line_style(label, i)
         style["markevery"] = history_marker_positions(series.value)
         ax.plot(x, series.value, label=label, **style)
+        if zoom_ax is not None:
+            zoom_ax.plot(x, series.value, label=label, **style)
 
     ax.set_xlabel(axis_label_text(resource_axis_name(resource)))
-    ax.set_ylabel(axis_label_text(y_label))
-    ax.set_title(title_case(f"{y_label} vs. {resource_axis_name(resource)}"))
+    if stage == "validation" and error_metric == "l2":
+        ax.set_ylabel(r"Validation $\ell_2$-error")
+    else:
+        ax.set_ylabel(axis_label_text(y_label))
+    # Axis labels provide the required context without a redundant plot title.
+    # ax.set_title(title_case(f"{y_label} vs. {resource_axis_name(resource)}"))
     ax.set_yscale(effective_yscale)
     if effective_yscale == "log":
         apply_log_axis_style(ax, "y")
     ax.grid(True, axis="y", which="major", alpha=0.3)
     style_plot_legend(ax)
+
+    if zoom_ax is not None:
+        zoom_ax.set_xlim(200, 1800)
+        zoom_ax.set_ylim(0.0600, 0.0630)
+        zoom_ax.set_xlabel(axis_label_text(resource_axis_name(resource)))
+        zoom_ax.set_ylabel(axis_label_text(y_label))
+        zoom_ax.set_title(
+            "Zoom Around Wall-clock Time = 1000 s "
+            "and Training Loss = 0.0615"
+        )
+        zoom_ax.grid(True, axis="both", which="major", alpha=0.3)
+
     fig.tight_layout(rect=(0, 0, 1, 1))
 
     output = outdir / f"learning_curve_{stage}_{resource}_{metric_name}.png"
@@ -405,30 +435,58 @@ def plot_history_hitting_curve(
 ) -> None:
     """Plot first-hitting resource as a function of target error threshold."""
     curves = hist.prepare_hitting_curve_data(runs, stage, error_metric, resource)
-    y_label = "first hitting step" if resource == "step" else "first hitting time (s)"
+    resource_label = "first hitting step" if resource == "step" else "first hitting time (s)"
     metric_label = hist.display_metric_name(stage, error_metric)
     metric_name = hist.filename_metric_name(stage, error_metric)
     effective_threshold_xscale = "linear" if stage == "training" else threshold_xscale
+    show_validation_time_zoom = stage == "validation" and resource == "time"
 
-    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    if show_validation_time_zoom:
+        fig, (ax, zoom_ax) = plt.subplots(
+            1,
+            2,
+            figsize=(13.5, 5.5),
+            gridspec_kw={"width_ratios": [1.35, 1.0]},
+        )
+    else:
+        fig, ax = plt.subplots(figsize=(8.5, 5.5))
+        zoom_ax = None
+
     threshold_arrays = []
     for i, (label, (thresholds, hits)) in enumerate(curves.items()):
         threshold_arrays.append(np.asarray(thresholds, dtype=float))
         style = history_line_style(label, i)
         style["markevery"] = history_marker_positions(hits)
-        ax.plot(thresholds, hits, label=label, **style)
+        if show_validation_time_zoom:
+            ax.plot(hits, thresholds, label=label, **style)
+            zoom_ax.plot(hits, thresholds, label=label, **style)
+        else:
+            ax.plot(thresholds, hits, label=label, **style)
 
-    ax.set_xlabel(axis_label_text(f"target {metric_label} threshold"))
-    ax.set_ylabel(axis_label_text(y_label))
-    ax.set_title(title_case(f"first hitting {resource} vs. target {metric_label}"))
-    ax.set_xscale(effective_threshold_xscale)
-    if effective_threshold_xscale == "log":
-        apply_log_axis_style(ax, "x")
-    ax.grid(True, axis="y", which="major", alpha=0.3)
-    style_plot_legend(ax)
+    if show_validation_time_zoom:
+        for current_ax in (ax, zoom_ax):
+            current_ax.set_xlabel(axis_label_text(resource_label))
+            current_ax.set_yscale(effective_threshold_xscale)
+            if effective_threshold_xscale == "log":
+                apply_log_axis_style(current_ax, "y")
+            current_ax.grid(True, axis="both", which="major", alpha=0.3)
+        ax.set_ylabel(r"Target Validation $\ell_2$-error")
+        zoom_ax.set_xlim(-10, 200)
+        zoom_ax.set_title("Zoom Around First-Hitting Time = 200 s")
+        style_plot_legend(ax)
+    else:
+        ax.set_xlabel(axis_label_text(f"target {metric_label} threshold"))
+        ax.set_ylabel(axis_label_text(resource_label))
+        ax.set_title(title_case(f"first hitting {resource} vs. target {metric_label}"))
+        ax.set_xscale(effective_threshold_xscale)
+        if effective_threshold_xscale == "log":
+            apply_log_axis_style(ax, "x")
+        ax.grid(True, axis="y", which="major", alpha=0.3)
+        style_plot_legend(ax)
+
     # Thresholds are generated from loose to strict.  Inverting the x-axis makes
     # the plot read naturally: moving right asks for a stricter/lower error.
-    if threshold_arrays:
+    if threshold_arrays and not show_validation_time_zoom:
         all_thresholds = np.concatenate(threshold_arrays)
         all_thresholds = all_thresholds[np.isfinite(all_thresholds)]
         if effective_threshold_xscale == "log":
@@ -439,7 +497,7 @@ def plot_history_hitting_curve(
             else:
                 low, high = padded_axis_limits(all_thresholds, effective_threshold_xscale)
             ax.set_xlim(high, low)
-    else:
+    elif not show_validation_time_zoom:
         ax.invert_xaxis()
     fig.tight_layout(rect=(0, 0, 1, 1))
 
@@ -476,11 +534,15 @@ def plot_forecast_error_curve(
             ax.fill_between(steps, values - std.to_numpy(), values + std.to_numpy(), alpha=0.12)
 
     ax.set_xlabel("Autoregressive Rollout Step")
-    ax.set_ylabel(axis_label_text(display_column))
-    title = f"Forecast {display_metric_text(error_metric)} Over Rollout: All Channels"
-    subtitle = "Spatial and channel mean per step; rollout initial condition only; no initial-condition averaging"
+    if error_metric == "l2":
+        ax.set_ylabel(r"Forecast $\ell_2$-error")
+    else:
+        ax.set_ylabel(axis_label_text(display_column))
     output_name = f"forecast_error_curve_{error_metric}.png"
-    ax.set_title(f"{title}\n{subtitle}", fontweight="bold")
+    # Axis labels provide enough context without a redundant title and subtitle.
+    # title = f"Forecast {display_metric_text(error_metric)} Over Rollout: All Channels"
+    # subtitle = "Spatial and channel mean per step; rollout initial condition only; no initial-condition averaging"
+    # ax.set_title(f"{title}\n{subtitle}", fontweight="bold")
     ax.set_yscale(yscale)
     if yscale == "log":
         apply_log_axis_style(ax, "y")
@@ -598,19 +660,9 @@ def plot_skill_horizon_vs_gamma(
         ax.set_ylim(bottom=0.0, top=max(1.0, y_high * 1.06))
 
     ax.set_xlabel("Allowed relative error threshold γ")
-    ax.set_ylabel("Reliable rollout length before error exceeds threshold [steps]")
-    ax.set_title("Forecast Reliability", fontweight="bold", pad=12)
-    if has_uncrossed:
-        ax.text(
-            0.99,
-            0.02,
-            "open markers: threshold was not crossed within the saved rollout horizon",
-            transform=ax.transAxes,
-            ha="right",
-            va="bottom",
-            fontsize=8.5,
-            color="0.25",
-        )
+    ax.set_ylabel("Reliable Rollout Length")
+    # Axis labels describe the reliability diagnostic without a redundant title.
+    # ax.set_title("Forecast Reliability", fontweight="bold", pad=12)
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(True, axis="y", which="major", alpha=0.28, linewidth=0.8)
     ax.grid(True, axis="x", which="major", alpha=0.14, linewidth=0.7)
@@ -1006,6 +1058,7 @@ def plot_combined_spectra(
     fig, axes = plt.subplots(2, 2, figsize=(13.0, 9.6))
     legend_handles = []
     legend_labels = []
+    comparison_linewidth = 2.2
 
     for idx, (ax, title, key) in enumerate(zip(axes.ravel(), titles, keys)):
         k = truth_spectra["wavenumbers"][1:]
@@ -1013,9 +1066,9 @@ def plot_combined_spectra(
         truth_line, = ax.loglog(
             k,
             truth_values,
-            color="black",
+            color="#6F2DBD",
             linestyle="--",
-            linewidth=2.6,
+            linewidth=comparison_linewidth,
             label="Ground Truth",
             zorder=5,
         )
@@ -1026,6 +1079,8 @@ def plot_combined_spectra(
         for i, (label, spectra) in enumerate(pred_spectra):
             k_pred = spectra["wavenumbers"][1:]
             style = optimizer_line_style(label, index=i, include_marker=len(k_pred) < 40)
+            style["linewidth"] = comparison_linewidth
+            style["alpha"] = 1.0
             line, = ax.loglog(
                 k_pred,
                 spectra[key][1:],
@@ -1046,13 +1101,29 @@ def plot_combined_spectra(
             ref_53_all = _scaled_power_law(ref_k_all, truth_values, -5.0 / 3.0)
             ref_3 = np.interp(k_ref, ref_k_all, ref_3_all)
             ref_53 = np.interp(k_ref, ref_k_all, ref_53_all)
-            ref_line_3, = ax.loglog(k_ref, ref_3, color="0.35", linestyle=":", linewidth=1.5, alpha=0.75, label=r"Scaled $k^{-3}$")
-            ref_line_53, = ax.loglog(k_ref, ref_53, color="0.35", linestyle="-.", linewidth=1.5, alpha=0.75, label=r"Scaled $k^{-5/3}$")
+            ref_line_3, = ax.loglog(
+                k_ref,
+                ref_3,
+                color="#6B7280",
+                linestyle=":",
+                linewidth=comparison_linewidth,
+                alpha=0.9,
+                label=r"Scaled $k^{-3}$",
+            )
+            ref_line_53, = ax.loglog(
+                k_ref,
+                ref_53,
+                color="#9CA3AF",
+                linestyle="-.",
+                linewidth=comparison_linewidth,
+                alpha=0.9,
+                label=r"Scaled $k^{-5/3}$",
+            )
             if ax is axes.ravel()[0]:
                 legend_handles.extend([ref_line_3, ref_line_53])
                 legend_labels.extend([r"Scaled $k^{-3}$", r"Scaled $k^{-5/3}$"])
 
-        ax.set_title(title, fontweight="bold")
+        ax.set_title(title, fontweight="normal")
         if idx // 2 == 1:
             ax.set_xlabel("Wavenumber $l$")
         if idx % 2 == 0:
@@ -1061,13 +1132,25 @@ def plot_combined_spectra(
         if len(k) > 0:
             ax.set_xlim(left=max(1, k[0]), right=k[-1])
 
-    fig.suptitle(
-        f"Final Rollout Spectra Comparison (Step {snapshots[0].step}; Saved Every {output_freq} Step(s))",
-        fontsize=14,
-        fontweight="bold",
+    # Panel labels and the shared legend provide enough context without a
+    # redundant figure-level title.
+    # fig.suptitle(
+    #     f"Final Rollout Spectra Comparison (Step {snapshots[0].step}; "
+    #     f"Saved Every {output_freq} Step(s))",
+    #     fontsize=14,
+    #     fontweight="bold",
+    # )
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        loc="lower center",
+        ncol=min(4, len(legend_labels)),
+        frameon=False,
+        fontsize=15,
+        handlelength=3.4,
+        columnspacing=2.0,
     )
-    fig.legend(legend_handles, legend_labels, loc="lower center", ncol=min(4, len(legend_labels)), frameon=False)
-    fig.tight_layout(rect=(0, 0.08, 1, 0.96))
+    fig.tight_layout(rect=(0, 0.12, 1, 1))
     save_figure(fig, outdir / "forecast_spectra_final.png")
 
 
@@ -1114,7 +1197,7 @@ def plot_combined_spectra_percent_difference(
                 legend_labels.append(label)
 
         ax.axhline(0.0, color="0.25", linewidth=1.1, alpha=0.75)
-        ax.set_title(title, fontweight="bold")
+        ax.set_title(title, fontweight="normal")
         if idx // 2 == 1:
             ax.set_xlabel("Wavenumber $l$")
         if idx % 2 == 0:
@@ -1124,13 +1207,25 @@ def plot_combined_spectra_percent_difference(
         if len(k) > 0:
             ax.set_xlim(left=max(1, k[0]), right=k[-1])
 
-    fig.suptitle(
-        f"Final Rollout Spectral Percentage Difference (Step {snapshots[0].step}; Saved Every {output_freq} Step(s))",
-        fontsize=14,
-        fontweight="bold",
+    # Panel labels and the shared legend provide enough context without a
+    # redundant figure-level title.
+    # fig.suptitle(
+    #     f"Final Rollout Spectral Percentage Difference (Step {snapshots[0].step}; "
+    #     f"Saved Every {output_freq} Step(s))",
+    #     fontsize=14,
+    #     fontweight="bold",
+    # )
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        loc="lower center",
+        ncol=min(4, len(legend_labels)),
+        frameon=False,
+        fontsize=15,
+        handlelength=3.4,
+        columnspacing=2.2,
     )
-    fig.legend(legend_handles, legend_labels, loc="lower center", ncol=min(4, len(legend_labels)), frameon=False)
-    fig.tight_layout(rect=(0, 0.08, 1, 0.96))
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
     save_figure(fig, outdir / "forecast_spectra_percent_difference_final.png")
 
 
