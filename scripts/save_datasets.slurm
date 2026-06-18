@@ -37,8 +37,8 @@ echo "Job ID: $SLURM_JOB_ID" | tee -a "$LOGFILE"
 echo "Time: $(date)"         | tee -a "$LOGFILE"
 nvidia-smi 2>&1              | tee -a "$LOGFILE" || true
 
-COMMON="--dt 900 --dt_solver 15 --dt_solver_ref 0.5 --nlat 128 --nlon 256 --n_steps_per_trajectory 10 --device cuda \
-  --n_stability_samples 20 --n_stability_steps 8 --stability_threshold 0.01"
+COMMON="--dt 3600 --dt_solver 60 --dt_solver_ref 4 --nlat 128 --nlon 256 --n_steps_per_trajectory 40 --device cuda \
+  --n_stability_samples 20 --n_stability_steps 15 --stability_threshold 0.01"
 
 # ── TRAINING DATA ──────────────────────────────────────────────────────────────
 
