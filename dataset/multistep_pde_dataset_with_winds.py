@@ -71,7 +71,7 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
         self.base_dataset.inp_mean = torch.mean(inp_samples, dim=(0, 2, 3), keepdim=True).reshape(-1, 1, 1)
         self.base_dataset.inp_var  = torch.var(inp_samples,  dim=(0, 2, 3), keepdim=True).reshape(-1, 1, 1)
         self.base_dataset.inp_var  = torch.maximum(
-            self.base_dataset.inp_var, torch.ones_like(self.base_dataset.inp_var) * 1e-8
+            self.base_dataset.inp_var, torch.ones_like(self.base_dataset.inp_var) * 1e-20
         )
 
     def _compute_wind_statistics(self, num_samples=20):
