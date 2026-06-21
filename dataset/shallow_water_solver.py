@@ -444,6 +444,18 @@ class ShallowWaterSolver(nn.Module):
         uspec[1:] = 0.0
         return uspec
 
+    def gaussian_bells_height_random_vortdiv_initial_condition(
+        self,
+        ref_mean: torch.Tensor,
+        ref_std: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Gaussian bells in height channel; vorticity and divergence from random_initial_condition (mach=0.2)."""
+        uspec = self.gaussian_bells_height_initial_condition(ref_mean, ref_std, **kwargs)
+        rand_spec = self.random_initial_condition(mach=0.2)
+        uspec[1:] = rand_spec[1:]
+        return uspec
+
     def williamson_case2_initial_condition(
         self,
         alpha=None,

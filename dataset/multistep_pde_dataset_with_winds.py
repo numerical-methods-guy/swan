@@ -149,6 +149,12 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
             spec = self.solver.gaussian_bells_height_initial_condition(
                 ref_mean, ref_std, **self.base_dataset.gbells_kwargs
             )
+        elif self.ictype == "gbells_h_rv":
+            ref_mean = self.base_dataset.gbells_ref_mean
+            ref_std  = self.base_dataset.gbells_ref_std
+            spec = self.solver.gaussian_bells_height_random_vortdiv_initial_condition(
+                ref_mean, ref_std, **self.base_dataset.gbells_kwargs
+            )
         elif self.ictype == "williamson_case2":
             spec = self.solver.williamson_case2_initial_condition(**self.base_dataset.wc2_kwargs)
         elif self.ictype == "williamson_case6":

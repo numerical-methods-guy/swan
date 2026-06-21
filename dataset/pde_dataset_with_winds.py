@@ -45,7 +45,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
         self.normalize = normalize
         self.device = device
 
-        gbells_kwargs = ic_kwargs if initial_condition in ("gbells", "gbells_h") else None
+        gbells_kwargs = ic_kwargs if initial_condition in ("gbells", "gbells_h", "gbells_h_rv") else None
         wc2_kwargs    = ic_kwargs if initial_condition == "williamson_case2" else None
         wc6_kwargs    = ic_kwargs if initial_condition == "williamson_case6" else None
         self.set_initial_condition(initial_condition, precomputed_folder=precomputed_folder,
@@ -101,6 +101,12 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
                     ref_mean = self.base_dataset.gbells_ref_mean
                     ref_std  = self.base_dataset.gbells_ref_std
                     inp_spec = self.solver.gaussian_bells_height_initial_condition(
+                        ref_mean, ref_std, **self.base_dataset.gbells_kwargs
+                    )
+                elif self.ictype == "gbells_h_rv":
+                    ref_mean = self.base_dataset.gbells_ref_mean
+                    ref_std  = self.base_dataset.gbells_ref_std
+                    inp_spec = self.solver.gaussian_bells_height_random_vortdiv_initial_condition(
                         ref_mean, ref_std, **self.base_dataset.gbells_kwargs
                     )
                 elif self.ictype == "williamson_case2":
@@ -163,6 +169,13 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
             ref_mean = self.base_dataset.gbells_ref_mean
             ref_std  = self.base_dataset.gbells_ref_std
             inp_spec = self.solver.gaussian_bells_height_initial_condition(
+                ref_mean, ref_std, **self.base_dataset.gbells_kwargs
+            )
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "gbells_h_rv":
+            ref_mean = self.base_dataset.gbells_ref_mean
+            ref_std  = self.base_dataset.gbells_ref_std
+            inp_spec = self.solver.gaussian_bells_height_random_vortdiv_initial_condition(
                 ref_mean, ref_std, **self.base_dataset.gbells_kwargs
             )
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)

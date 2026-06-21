@@ -104,7 +104,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             self.inp_var = torch.var(inp0, dim=(-1, -2)).reshape(-1, 1, 1)
 
     def __len__(self):
-        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "williamson_case2", "williamson_case6") else 1
+        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6") else 1
         return length
 
     def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None,
@@ -115,7 +115,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
                 raise ValueError("precomputed_folder must be provided when ictype='precomputed'")
             if precomputed_folder is not None:
                 self.precomputed_folder = precomputed_folder
-        elif ictype in ("gbells", "gbells_h"):
+        elif ictype in ("gbells", "gbells_h", "gbells_h_rv"):
             if gbells_kwargs is not None:
                 self.gbells_kwargs = gbells_kwargs
             if self.gbells_ref_mean is None:
@@ -131,7 +131,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
         elif ictype in ("random", "galewsky"):
             pass
         else:
-            raise ValueError(f"Unknown ictype: {ictype}")
+            raise ValueError(f"Unknown ictype: {ictype!r}")
 
     def _compute_gbells_ref_stats(self, n_samples: int = 20, ref_ictype: str = "random"):
         """Compute per-channel mean and std from ICs of ref_ictype for Gaussian bell scaling.
@@ -176,6 +176,11 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "gbells_h":
             inp_spec = self.solver.gaussian_bells_height_initial_condition(
+                self.gbells_ref_mean, self.gbells_ref_std, **self.gbells_kwargs
+            )
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "gbells_h_rv":
+            inp_spec = self.solver.gaussian_bells_height_random_vortdiv_initial_condition(
                 self.gbells_ref_mean, self.gbells_ref_std, **self.gbells_kwargs
             )
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)

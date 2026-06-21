@@ -49,6 +49,11 @@ def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbell
             raise ValueError("gbells_ref_mean and gbells_ref_std must be provided for ictype='gbells_h'")
         kwargs = gbells_kwargs or {}
         return solver.gaussian_bells_height_initial_condition(gbells_ref_mean, gbells_ref_std, **kwargs)
+    elif ictype == "gbells_h_rv":
+        if gbells_ref_mean is None or gbells_ref_std is None:
+            raise ValueError("gbells_ref_mean and gbells_ref_std must be provided for ictype='gbells_h_rv'")
+        kwargs = gbells_kwargs or {}
+        return solver.gaussian_bells_height_random_vortdiv_initial_condition(gbells_ref_mean, gbells_ref_std, **kwargs)
     elif ictype == "williamson_case2":
         kwargs = wc2_kwargs or {}
         return solver.williamson_case2_initial_condition(**kwargs)
@@ -118,7 +123,7 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
     # pre-compute Gaussian bell reference stats if needed
     gbells_ref_mean = None
     gbells_ref_std  = None
-    if ictype in ("gbells", "gbells_h"):
+    if ictype in ("gbells", "gbells_h", "gbells_h_rv"):
         print(f"Computing Gaussian bell reference statistics (ref_ictype={gbells_ref_ictype})...")
         gbells_ref_mean, gbells_ref_std = _compute_gbells_ref_stats(solver, ref_ictype=gbells_ref_ictype)
 
@@ -257,7 +262,7 @@ def save_metadata(output_folder, args, nsteps, stats, stability_summary):
         "wind_var":                tensor_to_list(stats["wind_var"]),
         "stability_check":         stability_summary,
     }
-    if args.ictype in ("gbells", "gbells_h"):
+    if args.ictype in ("gbells", "gbells_h", "gbells_h_rv"):
         meta["gbells_ref_ictype"] = args.gbells_ref_ictype
 
     # JSON
@@ -370,7 +375,7 @@ def visualize(output_folder, index, step, solver, compare_ref=False):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate and save precomputed SWE trajectory datasets.")
-    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "gbells_h", "williamson_case2", "williamson_case6"],
+    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6"],
                         help="Initial condition type")
     # Gaussian bells options (used when --ictype gbells)
     parser.add_argument("--gbells_k_min", type=int, default=1, help="Minimum number of bells per channel")
@@ -438,7 +443,7 @@ def main():
     print(f"Output folder: {output_folder}")
 
     gbells_kwargs = None
-    if args.ictype in ("gbells", "gbells_h"):
+    if args.ictype in ("gbells", "gbells_h", "gbells_h_rv"):
         gbells_kwargs = dict(
             k_min=args.gbells_k_min,
             k_max=args.gbells_k_max,

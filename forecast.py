@@ -578,15 +578,15 @@ def main():
         "--ic_type",
         type=str,
         default="random",
-        choices=["random", "galewsky", "gbells", "gbells_h", "williamson_case2", "williamson_case6"],
+        choices=["random", "galewsky", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6"],
         help="Initial condition type",
     )
     parser.add_argument(
         "--ic_kwargs",
         type=str,
         default=None,
-        help="JSON kwargs for the IC (e.g. bell params for gbells/gbells_h, wc2/wc6 range overrides). "
-             "For gbells/gbells_h you may also include 'gbells_ref_ictype' to choose the scaling reference.",
+        help="JSON kwargs for the IC (e.g. bell params for gbells/gbells_h/gbells_h_rv, wc2/wc6 range overrides). "
+             "For gbells/gbells_h/gbells_h_rv you may also include 'gbells_ref_ictype' to choose the scaling reference.",
     )
     parser.add_argument(
         "--stats_path",
@@ -679,7 +679,7 @@ def main():
     ic_kwargs = json.loads(args.ic_kwargs) if args.ic_kwargs else None
 
     gbells_ref_ictype = "random"
-    if ic_kwargs and args.ic_type in ("gbells", "gbells_h") and "gbells_ref_ictype" in ic_kwargs:
+    if ic_kwargs and args.ic_type in ("gbells", "gbells_h", "gbells_h_rv") and "gbells_ref_ictype" in ic_kwargs:
         ic_kwargs = dict(ic_kwargs)
         gbells_ref_ictype = ic_kwargs.pop("gbells_ref_ictype")
 
