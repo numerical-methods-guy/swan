@@ -191,11 +191,15 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
                 )
 
                 if self.normalize:
-                    inp_fields = (inp_fields - self.inp_mean) / torch.sqrt(self.inp_var)
-                    tar_fields = (tar_fields - self.inp_mean) / torch.sqrt(self.inp_var)
-
-                    inp_winds = (inp_winds - self.wind_mean) / torch.sqrt(self.wind_var)
-                    tar_winds = (tar_winds - self.wind_mean) / torch.sqrt(self.wind_var)
+                    dev = inp_fields.device
+                    inp_mean  = self.inp_mean.to(dev)
+                    inp_std   = torch.sqrt(self.inp_var.to(dev))
+                    wind_mean = self.wind_mean.to(dev)
+                    wind_std  = torch.sqrt(self.wind_var.to(dev))
+                    inp_fields = (inp_fields - inp_mean) / inp_std
+                    tar_fields = (tar_fields - inp_mean) / inp_std
+                    inp_winds  = (inp_winds  - wind_mean) / wind_std
+                    tar_winds  = (tar_winds  - wind_mean) / wind_std
 
         return (
             inp_fields.clone(),
