@@ -70,7 +70,7 @@ Shallow-Water Artificial Network (SWAN)
   - `build_paradis_loss` — constructs ParadisLoss from config
   - `parse_ic_dict` — parses a JSON string into an ic_dict; converts list values to tuples for precomputed entries
   - `create_datasets` — builds train/val datasets using `build_mixed_dataset`; accepts `train_ic_dict`, `val_ic_dict`, `n_rollout_steps`, `input_step_idx`
-  - `main` — entry point; CLI args include `--n_rollout_steps`, `--input_step_idx`, `--train_ic_dict`, `--val_ic_dict`, `--should_detach`; after dataset creation, val dataset stats are overwritten to match train dataset stats; saves `stats.pt` and `stats.json` to `training.save_dir` containing `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `input_step_idx`
+  - `main` — entry point; CLI args include `--n_rollout_steps`, `--input_step_idx`, `--train_ic_dict`, `--val_ic_dict`, `--should_detach`, `--resume_from` (skips pretraining and loads checkpoint for finetuning), `--start_ckpt` (warm-starts pretraining weights from a checkpoint without skipping pretraining); after dataset creation, val dataset stats are overwritten to match train dataset stats; saves `stats.pt` and `stats.json` to `training.save_dir` containing `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `input_step_idx`
   - `SWELightningModule` — PyTorch Lightning training module
     - **Variables:** `solver`, `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `should_detach`
     - `__init__` — accepts `solver`, `inp_mean`, `inp_var`, `wind_mean`, `wind_var`, `should_detach`
