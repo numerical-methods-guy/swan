@@ -238,7 +238,7 @@ def _run_single_ic_inference(
     wind_var = dataset.wind_var
 
     # --- Timing pass: ML model ---
-    inp_fields, inp_winds_raw, _, _ = dataset._get_sample_with_winds()
+    inp_fields, inp_winds_raw, _, _ = dataset._get_sample_with_winds(index=ic_index)
 
     prd_fields = (inp_fields - inp_mean) / torch.sqrt(inp_var)
     prd_fields = prd_fields.unsqueeze(0)
@@ -278,7 +278,7 @@ def _run_single_ic_inference(
     # --- Metrics and output pass ---
     # tar_fields: (n_rollout_steps, 3, nlat, nlon), tar_winds: (n_rollout_steps, 2, nlat, nlon)
     # unnormalized; from the same solver that generated the IC via input_step_idx warmup
-    inp_fields, prd_uv_grid_init, tar_fields, tar_winds = dataset._get_sample_with_winds()
+    inp_fields, prd_uv_grid_init, tar_fields, tar_winds = dataset._get_sample_with_winds(index=ic_index)
     n_metric_steps = min(autoreg_steps, tar_fields.shape[0])
 
     prd_fields = (inp_fields - inp_mean) / torch.sqrt(inp_var)
@@ -563,7 +563,8 @@ def main():
         "--checkpoint", type=str, required=True, help="Path to model checkpoint (.ckpt)"
     )
     parser.add_argument(
-        "--output_dir", type=str, default="./results", help="Directory to save results"
+        "--output_dir", type=str, default="./forecast_results",
+        help="Base directory under which a timestamped forecast_N subfolder is created",
     )
     parser.add_argument(
         "--autoreg_steps", type=int, default=10, help="Number of autoregressive steps"
@@ -578,8 +579,14 @@ def main():
         "--ic_type",
         type=str,
         default="random",
-        choices=["random", "galewsky", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6"],
+        choices=["random", "galewsky", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6", "precomputed"],
         help="Initial condition type",
+    )
+    parser.add_argument(
+        "--precomputed_folder",
+        type=str,
+        default=None,
+        help="Path to precomputed dataset folder (required when --ic_type precomputed)",
     )
     parser.add_argument(
         "--ic_kwargs",
@@ -628,6 +635,15 @@ def main():
 
     args = parser.parse_args()
 
+    # auto-generate a timestamped, non-colliding output subfolder
+    import datetime as _dt
+    _date = _dt.date.today().strftime("%Y%m%d")
+    _idx = 1
+    while os.path.exists(os.path.join(args.output_dir, f"{_date}_forecast{_idx}")):
+        _idx += 1
+    output_dir = os.path.join(args.output_dir, f"{_date}_forecast{_idx}")
+    os.makedirs(output_dir, exist_ok=True)
+
     pl.seed_everything(args.seed)
 
     if not os.path.exists(args.config):
@@ -649,7 +665,7 @@ def main():
     print(f"Autoregressive steps:{args.autoreg_steps}")
     print(f"IC type:             {args.ic_type}")
     print(f"Initial conditions:  {1 if args.ic_type == 'galewsky' else args.num_ics}")
-    print(f"Output directory:    {args.output_dir}")
+    print(f"Output directory:    {output_dir}")
     print(f"Save plots:          {not args.no_plots}")
     print(f"Spectral analysis:   {args.spectral_analysis}")
     print("=" * 70 + "\n")
@@ -683,6 +699,9 @@ def main():
         ic_kwargs = dict(ic_kwargs)
         gbells_ref_ictype = ic_kwargs.pop("gbells_ref_ictype")
 
+    if args.ic_type == "precomputed" and not args.precomputed_folder:
+        raise ValueError("--precomputed_folder is required when --ic_type precomputed")
+
     dataset = MultiStepPdeDatasetWithWinds(
         dt=dt,
         nsteps=nsteps,
@@ -695,6 +714,7 @@ def main():
         normalize=True,
         ic_kwargs=ic_kwargs,
         gbells_ref_ictype=gbells_ref_ictype,
+        precomputed_folder=args.precomputed_folder,
     )
     dataset.sht = dataset.solver.sht
 
@@ -715,7 +735,7 @@ def main():
         dataset=dataset,
         loss_fn=model_module.loss_fn,
         metrics_dict=metrics_dict,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         nsteps=nsteps,
         model_name="PARADIS",
         autoreg_steps=args.autoreg_steps,
@@ -744,13 +764,13 @@ def main():
     )
     print(f"{'Speedup':12s}: {results['speedup_mean']:.1f}x")
 
-    metrics_path = os.path.join(args.output_dir, "metrics.csv")
+    metrics_path = os.path.join(output_dir, "metrics.csv")
     pd.DataFrame([results]).to_csv(metrics_path, index=False)
 
     print("=" * 70)
     print(f"Metrics saved to: {metrics_path}")
     if not args.no_plots:
-        print(f"Plots saved to: {args.output_dir}")
+        print(f"Plots saved to: {output_dir}")
     print("=" * 70)
 
 
