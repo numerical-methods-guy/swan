@@ -422,6 +422,18 @@ def main():
         "--should_detach", action="store_true", default=False,
         help="Detach recomputed winds from the computation graph between rollout steps",
     )
+    parser.add_argument(
+        "--start_ckpt",
+        type=str,
+        default=None,
+        help="Checkpoint to warm-start pretraining weights from (pretraining still runs from epoch 1)",
+    )
+    parser.add_argument(
+        "--devices",
+        type=int,
+        default=1,
+        help="Number of GPUs to use (uses DDP strategy when >1)",
+    )
 
     known_args, unknown_args = parser.parse_known_args()
 
@@ -520,6 +532,16 @@ def main():
     elif config["training"]["amp_mode"] == "bf16":
         precision = "bf16"
 
+    if known_args.start_ckpt is not None:
+        print(f"\nWarm-starting weights from: {known_args.start_ckpt}")
+        ckpt = torch.load(known_args.start_ckpt, map_location=device)
+        state_dict = ckpt["state_dict"]
+        for key in ["metric_w11.k_phi_mesh", "metric_w11.k_theta_mesh"]:
+            if key in state_dict:
+                del state_dict[key]
+        model.load_state_dict(state_dict, strict=False)
+        print("Warm-start weights loaded.\n")
+
     if config["training"]["pretrain_epochs"] > 0 and known_args.resume_from is None:
         print("\n" + "=" * 70)
         print(
@@ -546,7 +568,8 @@ def main():
                 LearningRateMonitor(logging_interval="epoch"),
             ],
             accelerator="gpu" if torch.cuda.is_available() else "cpu",
-            devices=1,
+            devices=known_args.devices,
+            strategy="auto" if known_args.devices == 1 else "ddp",
             precision=precision,
             log_every_n_steps=config["training"]["log_every_n_steps"],
             check_val_every_n_epoch=1,
@@ -599,7 +622,8 @@ def main():
                 LearningRateMonitor(logging_interval="epoch"),
             ],
             accelerator="gpu" if torch.cuda.is_available() else "cpu",
-            devices=1,
+            devices=known_args.devices,
+            strategy="auto" if known_args.devices == 1 else "ddp",
             precision=precision,
             log_every_n_steps=config["training"]["log_every_n_steps"],
             check_val_every_n_epoch=1,

@@ -325,6 +325,12 @@ def main():
         default=None,
         help="Checkpoint to warm-start pretraining weights from (pretraining still runs from epoch 1)",
     )
+    parser.add_argument(
+        "--devices",
+        type=int,
+        default=1,
+        help="Number of GPUs to use (uses DDP strategy when >1)",
+    )
 
     known_args, unknown_args = parser.parse_known_args()
 
@@ -459,7 +465,8 @@ def main():
                 LearningRateMonitor(logging_interval="epoch"),
             ],
             accelerator="gpu" if torch.cuda.is_available() else "cpu",
-            devices=1,
+            devices=known_args.devices,
+            strategy="auto" if known_args.devices == 1 else "ddp",
             precision=precision,
             log_every_n_steps=config["training"]["log_every_n_steps"],
             check_val_every_n_epoch=1,
@@ -512,7 +519,8 @@ def main():
                 LearningRateMonitor(logging_interval="epoch"),
             ],
             accelerator="gpu" if torch.cuda.is_available() else "cpu",
-            devices=1,
+            devices=known_args.devices,
+            strategy="auto" if known_args.devices == 1 else "ddp",
             precision=precision,
             log_every_n_steps=config["training"]["log_every_n_steps"],
             check_val_every_n_epoch=1,
