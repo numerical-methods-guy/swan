@@ -501,6 +501,7 @@ def autoregressive_inference(
     save_plots=True,
     spectral_analysis=True,
     device=torch.device("cpu"),
+    ic_start_index=0,
 ):
     """Perform autoregressive inference over one or more initial conditions.
 
@@ -547,8 +548,8 @@ def autoregressive_inference(
     )
 
     with torch.no_grad():
-        for ic_idx in range(num_ics):
-            print(f"\n--- IC {ic_idx + 1}/{num_ics} ---")
+        for i, ic_idx in enumerate(range(ic_start_index, ic_start_index + num_ics)):
+            print(f"\n--- IC {i + 1}/{num_ics} (dataset index {ic_idx}) ---")
             step_metrics, ml_time, solver_time = _run_single_ic_inference(
                 model=model,
                 dataset=dataset,
@@ -557,11 +558,11 @@ def autoregressive_inference(
                 nsteps=nsteps,
                 autoreg_steps=autoreg_steps,
                 device=device,
-                output_dir=output_dir if ic_idx == 0 else None,
+                output_dir=output_dir if i == 0 else None,
                 ic_index=ic_idx,
                 plot_channel=plot_channel,
-                save_plots=save_plots and ic_idx == 0,
-                spectral_analysis=spectral_analysis and ic_idx == 0,
+                save_plots=save_plots and i == 0,
+                spectral_analysis=spectral_analysis and i == 0,
                 model_name=model_name,
             )
             all_step_metrics.append(step_metrics)
@@ -598,6 +599,12 @@ def main():
         type=int,
         default=1,
         help="Number of initial conditions to average over (ignored for galewsky)",
+    )
+    parser.add_argument(
+        "--ic_start_index",
+        type=int,
+        default=0,
+        help="Dataset index of the first IC to use (default 0)",
     )
     parser.add_argument(
         "--ic_type",
@@ -770,6 +777,7 @@ def main():
         save_plots=(not args.no_plots),
         spectral_analysis=args.spectral_analysis,
         device=device,
+        ic_start_index=args.ic_start_index,
     )
 
     print("\n" + "=" * 70)
