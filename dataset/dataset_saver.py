@@ -135,6 +135,10 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
     wind_mean   = None
     wind_M2     = None
 
+    # running min/max over all 5 channels (3 fields + 2 winds)
+    all_min = None
+    all_max = None
+
     stability_errors = []
 
     with torch.no_grad():
@@ -171,6 +175,16 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
                 field_count, field_mean, field_M2 = welford_update(field_count, field_mean, field_M2, f_val)
                 wind_count,  wind_mean,  wind_M2  = welford_update(wind_count,  wind_mean,  wind_M2,  w_val)
 
+                all_vals = torch.cat([fields, winds], dim=0)  # (5, nlat, nlon)
+                batch_min = all_vals.amin(dim=(-1, -2))       # (5,)
+                batch_max = all_vals.amax(dim=(-1, -2))       # (5,)
+                if all_min is None:
+                    all_min = batch_min
+                    all_max = batch_max
+                else:
+                    all_min = torch.minimum(all_min, batch_min)
+                    all_max = torch.maximum(all_max, batch_max)
+
                 # stability check: advance reference solver and compare at each step
                 if do_stability and step > 0 and step <= n_stability_steps:
                     ref_path = os.path.join(stability_dir, f"{i}_{step}_ref.pt")
@@ -204,6 +218,8 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
         "inp_var":   field_var,
         "wind_mean": wind_mean,
         "wind_var":  wind_var,
+        "all_min":   all_min,   # (5,) — [h, vort, div, u, v]
+        "all_max":   all_max,   # (5,) — [h, vort, div, u, v]
     }
 
     # stability summary
@@ -260,6 +276,8 @@ def save_metadata(output_folder, args, nsteps, stats, stability_summary):
         "inp_var":                 tensor_to_list(stats["inp_var"]),
         "wind_mean":               tensor_to_list(stats["wind_mean"]),
         "wind_var":                tensor_to_list(stats["wind_var"]),
+        "all_min":                 tensor_to_list(stats["all_min"]),
+        "all_max":                 tensor_to_list(stats["all_max"]),
         "stability_check":         stability_summary,
     }
     if args.ictype in ("gbells", "gbells_h", "gbells_h_rv"):
@@ -292,6 +310,10 @@ def save_metadata(output_folder, args, nsteps, stats, stability_summary):
         f"  inp_var   : {meta['inp_var']}",
         f"  wind_mean : {meta['wind_mean']}",
         f"  wind_var  : {meta['wind_var']}",
+        "",
+        "Min/max over all data [h, vort, div, u, v]:",
+        f"  all_min   : {meta['all_min']}",
+        f"  all_max   : {meta['all_max']}",
         "",
         "Stability check:",
         f"  dt_solver_ref            : {sc['dt_solver_ref']} s",
