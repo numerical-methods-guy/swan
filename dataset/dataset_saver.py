@@ -332,7 +332,7 @@ def save_metadata(output_folder, args, nsteps, stats, stability_summary):
     print(f"\nMetadata saved to {json_path} and {txt_path}")
 
 
-def visualize(output_folder, index, step, solver, compare_ref=False):
+def visualize(output_folder, index, step, solver, compare_ref=False, save_path=None):
     """Load and plot a saved spectral state as physical fields.
 
     Args:
@@ -392,7 +392,11 @@ def visualize(output_folder, index, step, solver, compare_ref=False):
             plt.colorbar(im_diff, ax=axes[2, col])
 
     plt.tight_layout()
-    plt.show()
+    if save_path is not None:
+        plt.savefig(save_path, dpi=100)
+        plt.close()
+    else:
+        plt.show()
 
 
 def parse_args():
@@ -438,6 +442,8 @@ def parse_args():
                         help="Which step to visualize (used with --visualize_index)")
     parser.add_argument("--compare_ref", action="store_true", default=False,
                         help="If set, show stability reference alongside the main sample when visualizing")
+    parser.add_argument("--visualize_save_dir", type=str, default=None,
+                        help="If set, save visualizations to this directory instead of showing interactively")
     # Williamson case 2 options (used when --ictype williamson_case2)
     parser.add_argument("--wc2_gh0_min", type=float, default=20000.0, help="Minimum geopotential height (m^2/s^2)")
     parser.add_argument("--wc2_gh0_max", type=float, default=35000.0, help="Maximum geopotential height (m^2/s^2)")
@@ -520,12 +526,17 @@ def main():
 
     if args.visualize_index is not None:
         print(f"\nVisualizing sample {args.visualize_index}, step {args.visualize_step}...")
+        save_path = None
+        if args.visualize_save_dir is not None:
+            os.makedirs(args.visualize_save_dir, exist_ok=True)
+            save_path = os.path.join(args.visualize_save_dir, f"sample{args.visualize_index}_step{args.visualize_step:03d}.png")
         visualize(
             output_folder=output_folder,
             index=args.visualize_index,
             step=args.visualize_step,
             solver=solver,
             compare_ref=args.compare_ref,
+            save_path=save_path,
         )
 
     print("\nDone.")
