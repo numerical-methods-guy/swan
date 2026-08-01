@@ -14,7 +14,7 @@ SAVED_DATASETS_DIR = os.path.join(os.path.dirname(__file__), "Saved_Datasets")
 
 
 def build_solver(nlat, nlon, dt, dt_solver, device):
-    nsteps = dt // dt_solver
+    nsteps = int(dt / dt_solver)
     lmax = ceil(nlat / 3)
     mmax = lmax
     solver = (
@@ -111,7 +111,7 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
     stability_dir = os.path.join(output_folder, "stability_check")
 
     # build reference solver once
-    nsteps_ref = dt // dt_solver_ref
+    nsteps_ref = int(dt / dt_solver_ref)
     lmax = ceil(solver.nlat / 3)
     ref_solver = (
         ShallowWaterSolver(solver.nlat, solver.nlon, dt_solver_ref,
@@ -417,9 +417,9 @@ def parse_args():
                         help="IC type used to compute Gaussian bell reference stats (mean/std for scaling)")
     parser.add_argument("--dt", type=int, default=900,
                         help="Model timestep in seconds")
-    parser.add_argument("--dt_solver", type=int, default=150,
+    parser.add_argument("--dt_solver", type=float, default=150,
                         help="Solver sub-step in seconds")
-    parser.add_argument("--dt_solver_ref", type=int, default=5,
+    parser.add_argument("--dt_solver_ref", type=float, default=5,
                         help="Solver sub-step in seconds for stability reference runs (should be smaller than dt_solver)")
     parser.add_argument("--nlat", type=int, default=128)
     parser.add_argument("--nlon", type=int, default=256)
