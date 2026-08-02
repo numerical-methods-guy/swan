@@ -421,7 +421,7 @@ class ShallowWaterSolver(nn.Module):
 
         uv_grid    = torch.stack([u, v], dim=0)
         vrtdiv_spec = self.vrtdivspec(uv_grid)
-        phi_spec    = self.grid2spec(h.unsqueeze(0))[0]
+        phi_spec    = self.grid2spec((g * h).unsqueeze(0))[0]
 
         ctype = torch.complex128 if dtype == torch.float64 else torch.complex64
         uspec = torch.zeros(3, self.lmax, self.mmax, dtype=ctype, device=device)
