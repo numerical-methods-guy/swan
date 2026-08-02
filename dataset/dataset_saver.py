@@ -449,6 +449,7 @@ def parse_args():
     parser.add_argument("--wc2_gh0_max", type=float, default=35000.0, help="Maximum geopotential height (m^2/s^2)")
     parser.add_argument("--wc2_u0_min", type=float, default=10.0, help="Minimum wind speed (m/s)")
     parser.add_argument("--wc2_u0_max", type=float, default=60.0, help="Maximum wind speed (m/s)")
+    parser.add_argument("--wc2_alpha", type=float, default=None, help="Fixed tilt angle in radians (None = randomize over U(0, pi/2))")
     # Williamson case 6 options (used when --ictype williamson_case6)
     parser.add_argument("--wc6_r_min", type=int, default=1, help="Minimum wave number R")
     parser.add_argument("--wc6_r_max", type=int, default=5, help="Maximum wave number R")
@@ -490,6 +491,8 @@ def main():
             u0_min=args.wc2_u0_min,
             u0_max=args.wc2_u0_max,
         )
+        if args.wc2_alpha is not None:
+            wc2_kwargs["alpha"] = args.wc2_alpha
 
     wc6_kwargs = None
     if args.ictype == "williamson_case6":
