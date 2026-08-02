@@ -103,6 +103,13 @@ Shallow-Water Artificial Network (SWAN)
     - `on_validation_epoch_end` — steps validation-based schedulers
     - `on_load_checkpoint`
 
+### `scripts/`
+- `visualize_stability.py` — standalone script to visualize saved precomputed trajectory data; for each step plots all 3 fields (geopotential, vorticity, divergence) as heatmaps, with optional reference solver comparison and pointwise difference rows; saves one PNG per step to `--output_dir`
+  - CLI args: `--dataset_folder` (path to precomputed dataset folder), `--sample` (trajectory index, default 0), `--n_steps` (number of steps to visualize, default 40), `--output_dir` (required; directory to save PNGs), `--nlat` (default 128), `--nlon` (default 256), `--dt_solver` (default 60.0), `--device` (default cpu)
+  - Loads `{sample}_{step}.pt` for the main solver and `stability_check/{sample}_{step}_ref.pt` for the reference; skips steps where the main file is missing; plots 1 row (main only) when no reference exists, 3 rows (main / ref / diff) when it does
+  - Example: `python scripts/visualize_stability.py --dataset_folder /path/to/dataset --sample 0 --n_steps 40 --output_dir /path/to/plots --device cuda`
+- `example_forecast.sh`, `example_forecast_wc2.sh`, `example_forecast_wc6.sh` — example `forecast.py` invocations using `20260623_run1` weights with random, Williamson case 2, and Williamson case 6 ICs respectively
+
 ### Root
 - `forecast.py` — inference and forecasting script
   - Uses `MultiStepPdeDatasetWithWinds` as IC source; loads normalization stats from `stats.pt` (saved by training) and overrides the dataset's computed stats so train/forecast normalization is identical
