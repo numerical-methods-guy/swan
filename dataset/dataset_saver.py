@@ -160,20 +160,37 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
                 path = os.path.join(output_folder, f"{i}_{step}.pt")
                 torch.save(spec.cpu(), path)
 
-                # update normalization stats online
+                # update normalization stats online (parallel Welford / Chan's algorithm)
+                # treats all nlat*nlon pixels per step as a batch so inp_var reflects
+                # true pixel-level variance, not just variance of spatial means
                 fields = solver.spec2grid(spec)       # (3, nlat, nlon)
                 winds  = solver.getuv(spec[1:])       # (2, nlat, nlon)
-                f_val  = fields.mean(dim=(-1, -2))    # (3,)
-                w_val  = winds.mean(dim=(-1, -2))     # (2,)
+                batch_n = solver.nlat * solver.nlon
 
-                if field_mean is None:
-                    field_mean = torch.zeros_like(f_val)
-                    field_M2   = torch.zeros_like(f_val)
-                    wind_mean  = torch.zeros_like(w_val)
-                    wind_M2    = torch.zeros_like(w_val)
+                f_batch_mean = fields.mean(dim=(-1, -2))                          # (3,)
+                f_batch_M2   = fields.var(dim=(-1, -2), unbiased=False) * batch_n # (3,)
+                w_batch_mean = winds.mean(dim=(-1, -2))                           # (2,)
+                w_batch_M2   = winds.var(dim=(-1, -2), unbiased=False) * batch_n  # (2,)
 
-                field_count, field_mean, field_M2 = welford_update(field_count, field_mean, field_M2, f_val)
-                wind_count,  wind_mean,  wind_M2  = welford_update(wind_count,  wind_mean,  wind_M2,  w_val)
+                if field_count == 0:
+                    field_mean  = f_batch_mean
+                    field_M2    = f_batch_M2
+                    field_count = batch_n
+                    wind_mean   = w_batch_mean
+                    wind_M2     = w_batch_M2
+                    wind_count  = batch_n
+                else:
+                    new_field_count = field_count + batch_n
+                    f_delta     = f_batch_mean - field_mean
+                    field_mean  = field_mean + f_delta * batch_n / new_field_count
+                    field_M2    = field_M2 + f_batch_M2 + f_delta**2 * field_count * batch_n / new_field_count
+                    field_count = new_field_count
+
+                    new_wind_count = wind_count + batch_n
+                    w_delta    = w_batch_mean - wind_mean
+                    wind_mean  = wind_mean + w_delta * batch_n / new_wind_count
+                    wind_M2    = wind_M2 + w_batch_M2 + w_delta**2 * wind_count * batch_n / new_wind_count
+                    wind_count = new_wind_count
 
                 all_vals = torch.cat([fields, winds], dim=0)  # (5, nlat, nlon)
                 batch_min = all_vals.amin(dim=(-1, -2))       # (5,)
