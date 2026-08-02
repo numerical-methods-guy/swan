@@ -42,12 +42,13 @@ def plot_step(dataset_folder, sample, step, solver, output_dir):
         print(f"  skipping step {step}: main file not found")
         return
 
-    spec  = torch.load(main_path, map_location="cpu")
+    device = next(solver.parameters()).device
+    spec  = torch.load(main_path, map_location=device)
     fields = solver.spec2grid(spec).cpu()  # (3, nlat, nlon)
 
     has_ref = os.path.exists(ref_path)
     if has_ref:
-        spec_ref   = torch.load(ref_path, map_location="cpu")
+        spec_ref   = torch.load(ref_path, map_location=device)
         fields_ref = solver.spec2grid(spec_ref).cpu()
 
     field_names = ["Geopotential (h)", "Vorticity", "Divergence"]
