@@ -60,6 +60,17 @@ def generate_ic(solver, ictype, gbells_ref_mean=None, gbells_ref_std=None, gbell
     elif ictype == "williamson_case6":
         wc6_kwargs = wc6_kwargs or {}
         return solver.williamson_case6_initial_condition(**wc6_kwargs)
+    elif ictype == "williamson_case6_standard":
+        return solver.williamson_case6_initial_condition(
+            r_min=4, r_max=4,
+            omega_min=7.848e-6, omega_max=7.848e-6,
+            h0_min=8000.0, h0_max=8000.0,
+        )
+    elif ictype == "williamson_case6_r4":
+        kwargs = dict(wc6_kwargs or {})
+        kwargs["r_min"] = 4
+        kwargs["r_max"] = 4
+        return solver.williamson_case6_initial_condition(**kwargs)
     else:
         raise ValueError(f"Unsupported ictype: {ictype}")
 
@@ -80,6 +91,14 @@ def _compute_gbells_ref_stats(solver, n_samples=20, ref_ictype="random"):
                 spec = solver.williamson_case2_initial_condition()
             elif ref_ictype == "williamson_case6":
                 spec = solver.williamson_case6_initial_condition()
+            elif ref_ictype == "williamson_case6_standard":
+                spec = solver.williamson_case6_initial_condition(
+                    r_min=4, r_max=4,
+                    omega_min=7.848e-6, omega_max=7.848e-6,
+                    h0_min=8000.0, h0_max=8000.0,
+                )
+            elif ref_ictype == "williamson_case6_r4":
+                spec = solver.williamson_case6_initial_condition(r_min=4, r_max=4)
             elif ref_ictype == "galewsky":
                 spec = solver.galewsky_initial_condition()
             else:
@@ -418,7 +437,7 @@ def visualize(output_folder, index, step, solver, compare_ref=False, save_path=N
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate and save precomputed SWE trajectory datasets.")
-    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6"],
+    parser.add_argument("--ictype", type=str, default="random", choices=["random", "galewsky", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6", "williamson_case6_standard", "williamson_case6_r4"],
                         help="Initial condition type")
     # Gaussian bells options (used when --ictype gbells)
     parser.add_argument("--gbells_k_min", type=int, default=1, help="Minimum number of bells per channel")
@@ -430,7 +449,7 @@ def parse_args():
     parser.add_argument("--gbells_unsigned", action="store_true", default=False,
                         help="If set, bell amplitudes are drawn from U(0,1) instead of U(-1,1)")
     parser.add_argument("--gbells_ref_ictype", type=str, default="random",
-                        choices=["random", "williamson_case2", "williamson_case6", "galewsky"],
+                        choices=["random", "williamson_case2", "williamson_case6", "williamson_case6_standard", "williamson_case6_r4", "galewsky"],
                         help="IC type used to compute Gaussian bell reference stats (mean/std for scaling)")
     parser.add_argument("--dt", type=int, default=900,
                         help="Model timestep in seconds")
@@ -512,7 +531,7 @@ def main():
             wc2_kwargs["alpha"] = args.wc2_alpha
 
     wc6_kwargs = None
-    if args.ictype == "williamson_case6":
+    if args.ictype in ("williamson_case6", "williamson_case6_r4"):
         wc6_kwargs = dict(
             r_min=args.wc6_r_min,
             r_max=args.wc6_r_max,

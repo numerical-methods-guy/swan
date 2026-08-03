@@ -47,7 +47,7 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
 
         gbells_kwargs = ic_kwargs if initial_condition in ("gbells", "gbells_h", "gbells_h_rv") else None
         wc2_kwargs    = ic_kwargs if initial_condition == "williamson_case2" else None
-        wc6_kwargs    = ic_kwargs if initial_condition == "williamson_case6" else None
+        wc6_kwargs    = ic_kwargs if initial_condition in ("williamson_case6", "williamson_case6_r4") else None
         self.set_initial_condition(initial_condition, precomputed_folder=precomputed_folder,
                                    gbells_kwargs=gbells_kwargs, wc2_kwargs=wc2_kwargs, wc6_kwargs=wc6_kwargs,
                                    gbells_ref_ictype=gbells_ref_ictype)
@@ -113,6 +113,12 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
                     inp_spec = self.solver.williamson_case2_initial_condition(**self.base_dataset.wc2_kwargs)
                 elif self.ictype == "williamson_case6":
                     inp_spec = self.solver.williamson_case6_initial_condition(**self.base_dataset.wc6_kwargs)
+                elif self.ictype == "williamson_case6_standard":
+                    inp_spec = self.solver.williamson_case6_initial_condition(
+                        r_min=4, r_max=4, omega_min=7.848e-6, omega_max=7.848e-6, h0_min=8000.0, h0_max=8000.0,
+                    )
+                elif self.ictype == "williamson_case6_r4":
+                    inp_spec = self.solver.williamson_case6_initial_condition(**{**self.base_dataset.wc6_kwargs, "r_min": 4, "r_max": 4})
                 elif self.ictype == "precomputed":
                     inp_spec = self.solver.precomputed_initial_condition(self.precomputed_folder, i, step=0)
 
@@ -184,6 +190,14 @@ class PdeDatasetWithWinds(torch.utils.data.Dataset):
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "williamson_case6":
             inp_spec = self.solver.williamson_case6_initial_condition(**self.base_dataset.wc6_kwargs)
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "williamson_case6_standard":
+            inp_spec = self.solver.williamson_case6_initial_condition(
+                r_min=4, r_max=4, omega_min=7.848e-6, omega_max=7.848e-6, h0_min=8000.0, h0_max=8000.0,
+            )
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "williamson_case6_r4":
+            inp_spec = self.solver.williamson_case6_initial_condition(**{**self.base_dataset.wc6_kwargs, "r_min": 4, "r_max": 4})
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "precomputed":
             if index is None:

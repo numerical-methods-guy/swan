@@ -450,10 +450,21 @@ class ShallowWaterSolver(nn.Module):
         ref_std: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        """Gaussian bells in height channel; vorticity and divergence from random_initial_condition (mach=0.2)."""
+        """Gaussian bells in height channel; vorticity and divergence from random_initial_condition (mach=0.2),
+        rescaled to match ref_mean/ref_std on channels 1 and 2."""
         uspec = self.gaussian_bells_height_initial_condition(ref_mean, ref_std, **kwargs)
         rand_spec = self.random_initial_condition(mach=0.2)
-        uspec[1:] = rand_spec[1:]
+
+        # normalize random vortdiv to zero mean/unit std, then rescale to reference distribution
+        rand_vd_grid = self.spec2grid(rand_spec[1:])  # (2, nlat, nlon)
+        for ch in range(2):
+            f = rand_vd_grid[ch]
+            f = (f - f.mean()) / (f.std() + 1e-6)
+            f = ref_mean[ch + 1] + ref_std[ch + 1] * f
+            rand_vd_grid[ch] = f
+        uspec[1] = self.grid2spec(rand_vd_grid[0])
+        uspec[2] = self.grid2spec(rand_vd_grid[1])
+
         return uspec
 
     def williamson_case2_initial_condition(

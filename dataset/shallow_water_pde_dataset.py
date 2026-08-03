@@ -104,7 +104,7 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             self.inp_var = torch.var(inp0, dim=(-1, -2)).reshape(-1, 1, 1)
 
     def __len__(self):
-        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6") else 1
+        length = self.num_examples if self.ictype in ("random", "precomputed", "gbells", "gbells_h", "gbells_h_rv", "williamson_case2", "williamson_case6", "williamson_case6_standard", "williamson_case6_r4") else 1
         return length
 
     def set_initial_condition(self, ictype="random", precomputed_folder=None, gbells_kwargs=None,
@@ -122,9 +122,11 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
                 self.gbells_ref_mean, self.gbells_ref_std = self._compute_gbells_ref_stats(
                     ref_ictype=gbells_ref_ictype
                 )
-        elif ictype == "williamson_case6":
+        elif ictype in ("williamson_case6", "williamson_case6_r4"):
             if wc6_kwargs is not None:
                 self.wc6_kwargs = wc6_kwargs
+        elif ictype == "williamson_case6_standard":
+            pass
         elif ictype == "williamson_case2":
             if wc2_kwargs is not None:
                 self.wc2_kwargs = wc2_kwargs
@@ -150,6 +152,12 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
                     spec = self.solver.williamson_case2_initial_condition()
                 elif ref_ictype == "williamson_case6":
                     spec = self.solver.williamson_case6_initial_condition()
+                elif ref_ictype == "williamson_case6_standard":
+                    spec = self.solver.williamson_case6_initial_condition(
+                        r_min=4, r_max=4, omega_min=7.848e-6, omega_max=7.848e-6, h0_min=8000.0, h0_max=8000.0,
+                    )
+                elif ref_ictype == "williamson_case6_r4":
+                    spec = self.solver.williamson_case6_initial_condition(r_min=4, r_max=4)
                 elif ref_ictype == "galewsky":
                     spec = self.solver.galewsky_initial_condition()
                 else:
@@ -189,6 +197,14 @@ class ShallowWaterPDEDataset(torch.utils.data.Dataset):
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "williamson_case6":
             inp_spec = self.solver.williamson_case6_initial_condition(**self.wc6_kwargs)
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "williamson_case6_standard":
+            inp_spec = self.solver.williamson_case6_initial_condition(
+                r_min=4, r_max=4, omega_min=7.848e-6, omega_max=7.848e-6, h0_min=8000.0, h0_max=8000.0,
+            )
+            tar_spec = self.solver.timestep(inp_spec, self.nsteps)
+        elif self.ictype == "williamson_case6_r4":
+            inp_spec = self.solver.williamson_case6_initial_condition(**{**self.wc6_kwargs, "r_min": 4, "r_max": 4})
             tar_spec = self.solver.timestep(inp_spec, self.nsteps)
         elif self.ictype == "precomputed":
             if index is None:

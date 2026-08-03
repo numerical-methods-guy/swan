@@ -159,6 +159,12 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
             spec = self.solver.williamson_case2_initial_condition(**self.base_dataset.wc2_kwargs)
         elif self.ictype == "williamson_case6":
             spec = self.solver.williamson_case6_initial_condition(**self.base_dataset.wc6_kwargs)
+        elif self.ictype == "williamson_case6_standard":
+            spec = self.solver.williamson_case6_initial_condition(
+                r_min=4, r_max=4, omega_min=7.848e-6, omega_max=7.848e-6, h0_min=8000.0, h0_max=8000.0,
+            )
+        elif self.ictype == "williamson_case6_r4":
+            spec = self.solver.williamson_case6_initial_condition(**{**self.base_dataset.wc6_kwargs, "r_min": 4, "r_max": 4})
         else:
             raise NotImplementedError(f"Initial Condition {self.ictype} not implemented.")
 
