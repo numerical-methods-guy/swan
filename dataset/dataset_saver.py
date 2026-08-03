@@ -123,7 +123,7 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
                       output_folder, device, dt, dt_solver_ref,
                       n_stability_samples, n_stability_steps, stability_threshold,
                       gbells_kwargs=None, wc6_kwargs=None, wc2_kwargs=None,
-                      gbells_ref_ictype="random"):
+                      gbells_ref_ictype="random", gbells_ref_n_samples=20):
     """Generate trajectories, save .pt files, compute normalization stats online,
     and run the stability check inline for the first n_stability_samples trajectories."""
 
@@ -143,8 +143,8 @@ def save_trajectories(solver, ictype, n_samples, n_steps_per_trajectory, nsteps,
     gbells_ref_mean = None
     gbells_ref_std  = None
     if ictype in ("gbells", "gbells_h", "gbells_h_rv"):
-        print(f"Computing Gaussian bell reference statistics (ref_ictype={gbells_ref_ictype})...")
-        gbells_ref_mean, gbells_ref_std = _compute_gbells_ref_stats(solver, ref_ictype=gbells_ref_ictype)
+        print(f"Computing Gaussian bell reference statistics (ref_ictype={gbells_ref_ictype}, n_samples={gbells_ref_n_samples})...")
+        gbells_ref_mean, gbells_ref_std = _compute_gbells_ref_stats(solver, n_samples=gbells_ref_n_samples, ref_ictype=gbells_ref_ictype)
 
     # Welford accumulators for fields and winds
     field_count = 0
@@ -451,6 +451,8 @@ def parse_args():
     parser.add_argument("--gbells_ref_ictype", type=str, default="random",
                         choices=["random", "williamson_case2", "williamson_case6", "williamson_case6_standard", "williamson_case6_r4", "galewsky"],
                         help="IC type used to compute Gaussian bell reference stats (mean/std for scaling)")
+    parser.add_argument("--gbells_ref_n_samples", type=int, default=20,
+                        help="Number of ICs sampled to compute Gaussian bell reference mean/std")
     parser.add_argument("--dt", type=int, default=900,
                         help="Model timestep in seconds")
     parser.add_argument("--dt_solver", type=float, default=150,
@@ -559,6 +561,7 @@ def main():
         wc6_kwargs=wc6_kwargs,
         wc2_kwargs=wc2_kwargs,
         gbells_ref_ictype=args.gbells_ref_ictype,
+        gbells_ref_n_samples=args.gbells_ref_n_samples,
     )
 
     save_metadata(output_folder, args, nsteps, stats, stability_summary)
