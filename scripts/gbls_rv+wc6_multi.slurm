@@ -5,7 +5,7 @@
 #SBATCH --partition=gpu_a100
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=8
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=2
 #SBATCH --gres=gpu:8
 #SBATCH --mem=1024G
 #SBATCH --time=48:00:00
@@ -90,6 +90,7 @@ srun --cpus-per-task=4 $PY Training/train.py \
   --train_ic_dict '{"precomputed_gbells_h_rv": [1536, "'"$TRAIN_DIR"'/ref_random/gbells_h_rv_60.0_20260803"], "precomputed_wc6_matched": [512, "'"$TRAIN_DIR"'/wc6/matched/williamson_case6_r4_60.0_20260804"]}' \
   --val_ic_dict   '{"precomputed_gbells_h_rv": [96,   "'"$VAL_DIR"'/ref_random/gbells_h_rv_60.0_20260804"],  "precomputed_wc6_matched": [32,  "'"$VAL_DIR"'/wc6/matched/williamson_case6_r4_60.0_20260804"]}' \
   --devices 8 \
+  --data.num_workers 2 \
   2>&1 | tee -a "$LOGFILE"
 
 RC=$?
