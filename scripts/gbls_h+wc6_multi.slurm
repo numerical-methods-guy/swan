@@ -4,10 +4,10 @@
 #SBATCH --account=eccc_pegasus_mrd__gpu_a100
 #SBATCH --partition=gpu_a100
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=8
-#SBATCH --cpus-per-task=2
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:8
-#SBATCH --mem=960G
+#SBATCH --mem=500G
 #SBATCH --time=48:00:00
 #SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
 #SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
@@ -67,7 +67,7 @@ mkdir -p "$REPO/old_scripts/${DATE}"
 cp "$0" "$REPO/old_scripts/${DATE}/gbls_h+wc6_multi_${TS}.slurm"
 
 export PYTHONPATH="$REPO"
-srun --cpus-per-task=2 $PY Training/train.py \
+$PY Training/train.py \
   --config config_paradis.yaml \
   --training.save_dir "$SAVEDIR" \
   --experiment.name gbls_h+wc6_multi_${TS} \
