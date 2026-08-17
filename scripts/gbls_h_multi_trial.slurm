@@ -91,6 +91,7 @@ $PY Training/train.py \
   --val_ic_dict   '{"precomputed_gbells_h": [128,  "'"$VAL_DIR"'/gbells_h_60.0_20260803"]}' \
   --devices 8 \
   --data.num_workers 2 \
+  --training.gradient_checkpointing true \
   2>&1 | tee -a "$LOGFILE"
 
 RC=$?
