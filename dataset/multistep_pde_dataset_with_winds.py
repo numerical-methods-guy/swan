@@ -208,8 +208,8 @@ class MultiStepPdeDatasetWithWinds(PdeDatasetWithWinds):
                     tar_winds  = (tar_winds  - wind_mean) / wind_std
 
         return (
-            inp_fields.clone(),
-            inp_winds.clone(),
-            tar_fields.clone(),
-            tar_winds.clone(),
+            inp_fields.cpu().clone(),
+            inp_winds.cpu().clone(),
+            tar_fields.cpu().clone(),
+            tar_winds.cpu().clone(),
         )
