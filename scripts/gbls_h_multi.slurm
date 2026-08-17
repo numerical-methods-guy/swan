@@ -67,7 +67,7 @@ mkdir -p "$REPO/old_scripts/${DATE}"
 cp "$0" "$REPO/old_scripts/${DATE}/gbls_h_multi_${TS}.slurm"
 
 export PYTHONPATH="$REPO"
-$PY Training/train.py \
+srun --cpus-per-task=2 $PY Training/train.py \
   --config config_paradis.yaml \
   --training.save_dir "$SAVEDIR" \
   --experiment.name gbls_h_multi_${TS} \
