@@ -1,5 +1,6 @@
 #!/bin/bash
 BASE="/space/hall0/work/eccc/mrd/rpnatm/avg000/Trained_weights_and_Graphs"
+MULTISTEP_DIR="$BASE/multistep_$(date +%Y%m%d)"
 VAL_DIR="/fs/hestia_Heccc/rpnatm/avg000/work/datasets/val"
 REPO="/home/avg000/swan"
 PY="/home/avg000/miniconda3/envs/swan/bin/python"
@@ -57,7 +58,7 @@ for RUN in rollout_rv_wc6 rollout_h rollout_rv rollout_h_wc6; do
   for DS in gbells_h gbells_h_rv wc6_matched wc6_rv_matched wc2; do
     IC="${IC_IDX[${RUN}_${DS}]}"
     FOLDER="${DATASETS[$DS]}"
-    OUT="$BASE/$RUN/forecasts/$DS/ic${IC}"
+    OUT="$MULTISTEP_DIR/$RUN/forecasts/$DS/ic${IC}"
 
     for CH in 0 1 2; do
       case $CH in
