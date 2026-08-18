@@ -63,8 +63,8 @@ GPU_MONITOR_PID=$!
 echo "GPU monitor PID: $GPU_MONITOR_PID  log: $GPU_LOGFILE" | tee -a "$LOGFILE"
 
 cp "$0" "$SAVEDIR/gbls_rv+wc6_multi_${TS}.slurm"
-mkdir -p "$REPO/old_scripts/${DATE}"
-cp "$0" "$REPO/old_scripts/${DATE}/gbls_rv+wc6_multi_${TS}.slurm"
+mkdir -p "$REPO/old_scripts/${DATE}" || true
+cp "$0" "$REPO/old_scripts/${DATE}/gbls_rv+wc6_multi_${TS}.slurm" || true
 
 export PYTHONPATH="$REPO"
 srun --cpus-per-task=2 $PY Training/train.py \
