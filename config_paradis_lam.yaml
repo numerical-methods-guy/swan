@@ -1,0 +1,172 @@
+# config for 0.25 degree resolution in core area and 1 degree resolution in plioting zone
+experiment:
+  name: "spherical_swe_paradis"
+  seed: 42
+  model_type: "paradis"
+
+data:
+  nlat: 360
+  nlon: 720
+  dt: 900               # Time step for the model (15 mins)
+  dt_solver: 20        # Time step for the underlying solver
+  batch_size: 8
+  num_workers: 20        # Set to 0 if dataset generation issues occur
+  grid: "equiangular"   # PARADIS requires equiangular grid
+  num_train_examples: 70
+  num_val_examples: 15
+  num_test_examples: 15
+
+dataset:
+  h5_path: data/swe_paired_anomaly_0pt125deg.h5
+  preload: false
+
+loss:
+  loss_function: "mse"   # Options: "reversed_huber", "mse", "mae, "amse"
+  delta_loss: 1.0                   # Threshold for the reversed Huber loss
+
+rotation:
+  enabled: true
+  pole_target_lat_deg: 0.0
+  pole_target_lon_deg: 0.0
+  interpolation: "bilinear"
+  output_suffix: "_rotated"
+
+perturbation:
+  enabled: false
+
+  # balanced_vortex: geopotential anomaly + geostrophic u/v-derived
+  #                  vorticity/divergence anomaly.
+  # height_only: deliberately unbalanced geopotential anomaly, useful
+  #              later as a gravity-wave/adjustment stress test.
+  kind: "balanced_vortex"
+
+  # Coordinates are in the solver grid's latitude/longitude frame.
+  center_lat_deg: 60.0
+  center_lon_deg: 60.0
+
+  # Start with a well-resolved anomaly. On a 0.125-degree HR grid,
+  # 500 km is approximately 36 HR grid cells across in radius.
+  radius_km: 500.0
+
+  # Units are m^2 s^-2. Equivalent height amplitude is Phi / g.
+  geopotential_amplitude: 6000.0
+
+  # Geostrophic construction is not appropriate near f = 0.
+  min_abs_lat_deg: 15.0
+  coriolis_floor: 2.5e-5
+
+model:
+  paradis:
+    # --- Top-level model parameters ---
+    hidden_dim: 32        # cfg.model.latent_size in upstream
+    num_layers: 4         # Number of ADR layers
+    num_vels: 6           # cfg.model.velocity_vectors in upstream
+    base_dt: 900          # Must match data.dt; cfg.model.base_dt in upstream
+    interpolation: "bicubic"  # cfg.model.adv_interpolation in upstream; "bilinear" or "bicubic"
+    bias_channels: 2      # cfg.model.bias_channels in upstream
+    activation: "SiLU"    # cfg.model.activation in upstream; "SiLU" or "GELU"
+
+    # --- Sub-block architecture (cfg.model.physblock in upstream) ---
+    # layers: sequence of block types applied in order
+    # hidden_dim: width of intermediate channels between layers (0 = use input/output dim)
+    # LAM code replaces SepConv blocks with LocalSepConv for HR sections
+    physblock:
+      input_proj:
+        layers: ["SepConv", "CLinear"]
+        hidden_dim: 32
+      velocity_net:
+        layers: ["SepConv"]
+        hidden_dim: 32
+      diffusion:
+        layers: ["SepConv"]
+        hidden_dim: 16
+      reaction:
+        layers: ["CLinear", "CLinear"]
+        hidden_dim: 16
+      output_proj:
+        layers: ["SepConv", "CLinear"]
+        hidden_dim: 32
+      advection:
+        down_projection:
+          layers: ["CLinear"]
+          hidden_dim: 0
+        up_projection:
+          layers: ["SepConv"]
+          hidden_dim: 0
+
+training:
+  learning_rate: 1.0e-3
+  finetune_learning_rate: 1.0e-5
+  pretrain_epochs: 25
+  finetune_epochs: 0
+  nfuture: 1
+  amp_mode: "bf16"      # Options: "none", "fp16", "bf16"
+  log_every_n_steps: 10
+  save_dir: "./logs"
+  gradient_checkpointing: false  # cfg.compute.gradient_checkpointing in upstream
+  # Deterministic LR schedule: decay by lr_gamma at each milestone epoch.
+  # Remove these two keys to fall back to ReduceLROnPlateau.
+  # lr_milestones: [10, 16]
+  # lr_gamma: 0.5
+  lam_epochs: 60 # arbitrary number, play around with it as model gets optimized
+
+finetuning:
+  enabled: true
+
+  # Baseline one-step checkpoint to initialize from.
+  # Set this when enabled: true.
+  checkpoint_path: logs/spherical_swe_paradis_LAM/pretrain_baseline/checkpoints/lam-epochepoch=50-valval_loss=0.0230.ckpt
+
+  # Number of epochs in this fine-tuning run.
+  epochs: 15
+
+  # Curriculum: training horizon increases every epochs_per_horizon epochs.
+  initial_horizon: 1
+  max_horizon: 12
+  epochs_per_horizon: 1
+
+  # Each lead loss has weight lead_loss_decay ** lead_index.
+  # 1.0 means every lead has equal weight.
+  lead_loss_decay: 1.0
+
+  # Detached autoregression:
+  # pred_t.detach() becomes the HR input for t+1.
+  detach_rollout: true
+
+  # Use the same schedule for validation as for training.
+  validation_uses_curriculum: false
+
+lam:
+  # --- refinement and patch geometry (LR grid) ---
+  refinement_factor_lat: 4            # HR nlat = LR nlat * refinement_factor_lat
+  refinement_factor_lon: 4            # HR nlon = LR nlon * refinement_factor_lon
+
+  patch_nlat_lr: 90                    # LR patch interior size (lat)
+  patch_nlon_lr: 180                   # LR patch interior size (lon)
+
+  halo_radius: 1
+  # halo_lat_lr: 4                      # LR halo cells in lat on each side -> removed for now
+  # halo_lon_lr: 4                      # LR halo cells in lon on each side -> removed for now
+
+  exclude_pole_rows: 2                # don't center patches in top/bottom 4 LR rows; exclude from training data
+
+  # --- mode: same-time SR vs joint space+time step ---
+  mode: "joint_step"                    # use "joint_step"; "superres" setting is outdated
+
+  # --- local ADR / PARADIS-style hyperparameters ---
+  # If omitted, lam_model.py should default to model.paradis values.
+  hidden_dim: 128                      # latent channel size (fallback: model.paradis.hidden_dim)
+  num_layers: 8                       # ADR layers (fallback: model.paradis.num_layers)
+  num_vels: 16                        # latent velocity vectors (fallback: model.paradis.num_vels)
+  base_dt: 900                        # effective dt for advection (seconds)
+  interpolation: "bicubic"            # "bilinear" or "bicubic"
+  activation: "SiLU"                  # same as model.paradis.activation
+
+  blending:
+    enabled: true
+    width_hr: 6
+    interpolation: "bilinear"
+    apply_in_training_loss: true
+    apply_to_hr_input: true
+    apply_in_rollout: true
+    training_edge_hr_weight: 0.0
