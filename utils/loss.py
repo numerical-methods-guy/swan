@@ -1,8 +1,72 @@
 import re
 import torch
 
+from lam_blending import build_hr_retention_weight, build_lr_blend_weight_hr
+
 def RMSELoss(yhat,y):
     return torch.sqrt(torch.mean((yhat-y)**2))
+
+class WeightedLAM_MSELoss(torch.nn.Module):
+    """
+    Spatially weighted MSE for the LAM patch.
+
+    Geometry comes from lam_blending.py:
+    - build_lr_blend_weight_hr(...) builds the LR-edge blend map on the HR patch
+    - build_hr_retention_weight(...) converts it to the HR-retention loss weight
+
+    Loss computation logic:
+    - target remains HR truth everywhere
+    - free zone gets larger weight
+    - blending zone gets reduced/ramped weight
+    """
+
+    def __init__(
+        self,
+        *,
+        patch_nlat_hr: int,
+        patch_nlon_hr: int,
+        blending_config: dict | None = None,
+        dtype: torch.dtype = torch.float32,
+    ) -> None:
+        super().__init__()
+
+        blending_config = {} if blending_config is None else blending_config
+
+        self.blending_enabled = bool(blending_config.get("enabled", False))
+        self.apply_in_training_loss = bool(
+            blending_config.get("apply_in_training_loss", True)
+        )
+        blend_width_hr = int(blending_config.get("width_hr", 0))
+        hr_weight_power = float(blending_config.get("training_hr_weight_power", 1.0))
+        training_min_weight = float(blending_config.get("training_min_weight", 0.0))
+
+        w_lr = build_lr_blend_weight_hr(
+            patch_nlat_hr=patch_nlat_hr,
+            patch_nlon_hr=patch_nlon_hr,
+            blend_width_hr=blend_width_hr,
+            dtype=dtype,
+        )
+        w_hr = build_hr_retention_weight(
+            w_lr,
+            power=hr_weight_power,
+            min_weight=training_min_weight,
+        )
+
+        self.register_buffer("blend_weight_lr_hr", w_lr, persistent=False)
+        self.register_buffer("train_loss_weight", w_hr, persistent=False)
+
+    @property
+    def use_weighted_loss(self) -> bool:
+        return self.blending_enabled and self.apply_in_training_loss
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        err2 = (pred - target) ** 2
+
+        if not self.use_weighted_loss:
+            return err2.mean()
+
+        w = self.train_loss_weight.to(device=pred.device, dtype=pred.dtype)
+        return (err2 * w).sum() / w.expand_as(err2).sum().clamp_min(1.0)
 
 class ParadisLoss(torch.nn.Module):
     """Loss function.
