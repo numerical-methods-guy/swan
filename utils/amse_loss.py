@@ -57,14 +57,17 @@ class AMSELoss(torch.nn.Module):
         # Maximum wavenumber
         max_k = nlat_spec - 1
 
-        # Initialize PSD tensor (real valued)
-        psd = torch.zeros(
-            batch_size,
-            num_channels,
-            max_k,
-            device=coefficients.device,
-            dtype=coefficients.real.dtype,
-        )
+        # Replaced in-place tensor writes with list+stack to fix gradient checkpointing
+        # (in-place ops on pre-allocated tensors corrupt recomputation during backward)
+        # Original code (commented out):
+        # psd = torch.zeros(
+        #     batch_size,
+        #     num_channels,
+        #     max_k,
+        #     device=coefficients.device,
+        #     dtype=coefficients.real.dtype,
+        # )
+        powers = []
 
         # Compute power for each wavenumber k
         # For real SHT: coefficients are complex (k, m) where k goes from 0 to nlat-1
@@ -78,9 +81,11 @@ class AMSELoss(torch.nn.Module):
                     2 * power_k - torch.abs(coefficients[:, :, k, 0]) ** 2
                 )  # Subtract m=0 to avoid double counting
 
-            psd[:, :, k] = power_k + eps
+            # psd[:, :, k] = power_k + eps  # original in-place write
+            powers.append(power_k + eps)
 
-        return psd
+        # return psd  # original
+        return torch.stack(powers, dim=-1)
 
     def _compute_coherence(self, pred_coeffs, target_coeffs, pred_psd, target_psd):
         """Compute spectral coherence between prediction and target.
@@ -103,14 +108,17 @@ class AMSELoss(torch.nn.Module):
 
         eps = 1e-7
 
-        # Initialize coherence (real valued)
-        coherence = torch.zeros(
-            batch_size,
-            num_channels,
-            max_k,
-            device=pred_coeffs.device,
-            dtype=pred_coeffs.real.dtype,
-        )
+        # Replaced in-place tensor writes with list+stack to fix gradient checkpointing
+        # (in-place ops on pre-allocated tensors corrupt recomputation during backward)
+        # Original code (commented out):
+        # coherence = torch.zeros(
+        #     batch_size,
+        #     num_channels,
+        #     max_k,
+        #     device=pred_coeffs.device,
+        #     dtype=pred_coeffs.real.dtype,
+        # )
+        coherences = []
 
         # Compute cross-spectrum for each wavenumber
         for k in range(max_k):
@@ -135,9 +143,11 @@ class AMSELoss(torch.nn.Module):
 
             # Clamp coherence to valid range [0, 1] (coherence is always non-negative)
             coh_k = torch.clamp(coh_k, 0.0, 1.0)
-            coherence[:, :, k] = coh_k
+            # coherence[:, :, k] = coh_k  # original in-place write
+            coherences.append(coh_k)
 
-        return coherence
+        # return coherence  # original
+        return torch.stack(coherences, dim=-1)
 
     def forward(self, prediction, target, weights=None):
         """Compute AMSE loss between prediction and target.
