@@ -71,15 +71,17 @@ class AMSELoss(torch.nn.Module):
 
         # Compute power for each wavenumber k
         # For real SHT: coefficients are complex (k, m) where k goes from 0 to nlat-1
+        # Use .real**2 + .imag**2 instead of torch.abs(complex)**2 to avoid
+        # CUDA driver error: invalid argument on non-contiguous complex SHT output
         for k in range(max_k):
             # Sum over all m for this k (m ranges from 0 to k)
             # Power is |coefficient|^2 = real^2 + imag^2
-            power_k = torch.sum(torch.abs(coefficients[:, :, k, : k + 1]) ** 2, dim=-1)
+            c = coefficients[:, :, k, : k + 1]
+            power_k = torch.sum(c.real ** 2 + c.imag ** 2, dim=-1)
             # Account for negative wavenumbers (multiply by 2, except m=0)
             if k > 0:
-                power_k = (
-                    2 * power_k - torch.abs(coefficients[:, :, k, 0]) ** 2
-                )  # Subtract m=0 to avoid double counting
+                c0 = coefficients[:, :, k, 0]
+                power_k = 2 * power_k - (c0.real ** 2 + c0.imag ** 2)
 
             # psd[:, :, k] = power_k + eps  # original in-place write
             powers.append(power_k + eps)
@@ -136,8 +138,8 @@ class AMSELoss(torch.nn.Module):
                 )
 
             # Coherence = |cross_spec| / sqrt(PSD_pred * PSD_target)
-            # Use magnitude of complex cross-spectrum
-            cross_spec_magnitude = torch.abs(cross_spec_k)
+            # Use .real/.imag instead of torch.abs to avoid CUDA driver error on complex tensors
+            cross_spec_magnitude = (cross_spec_k.real ** 2 + cross_spec_k.imag ** 2).sqrt()
             denom = torch.sqrt(pred_psd[:, :, k] * target_psd[:, :, k] + eps)
             coh_k = cross_spec_magnitude / (denom + eps)
 
@@ -170,8 +172,8 @@ class AMSELoss(torch.nn.Module):
             prediction_f32 = prediction.float()
             target_f32 = target.float()
 
-            pred_coeffs = self.sht(prediction_f32)
-            target_coeffs = self.sht(target_f32)
+            pred_coeffs = self.sht(prediction_f32).contiguous()
+            target_coeffs = self.sht(target_f32).contiguous()
 
         # Compute power spectral density for each wavenumber
         pred_psd = self._compute_psd(pred_coeffs)  # [batch, channels, max_k]
