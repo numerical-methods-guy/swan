@@ -124,22 +124,26 @@ class AMSELoss(torch.nn.Module):
 
         # Compute cross-spectrum for each wavenumber
         for k in range(max_k):
-            # Cross-spectrum: sum of element-wise products of complex coefficients
-            # conj(pred) * target gives us the cross-spectrum
-            cross_spec_k = torch.sum(
-                torch.conj(pred_coeffs[:, :, k, : k + 1])
-                * target_coeffs[:, :, k, : k + 1],
-                dim=-1,
-            )
+            # Cross-spectrum magnitude without torch.conj — conj(pred)*target backward
+            # triggers CUDA driver error: invalid argument on A100 GPUs.
+            # Use explicit real/imag: Re(<pc,tc>) = sum(pr*tr + pi*ti),
+            #                        Im(<pc,tc>) = sum(pr*ti - pi*tr)
+            pr = pred_coeffs[:, :, k, : k + 1].real
+            pi = pred_coeffs[:, :, k, : k + 1].imag
+            tr = target_coeffs[:, :, k, : k + 1].real
+            ti = target_coeffs[:, :, k, : k + 1].imag
+            re_k = torch.sum(pr * tr + pi * ti, dim=-1)
+            im_k = torch.sum(pr * ti - pi * tr, dim=-1)
             # Account for negative wavenumbers
             if k > 0:
-                cross_spec_k = 2 * cross_spec_k - (
-                    torch.conj(pred_coeffs[:, :, k, 0]) * target_coeffs[:, :, k, 0]
-                )
+                pr0 = pred_coeffs[:, :, k, 0].real
+                pi0 = pred_coeffs[:, :, k, 0].imag
+                tr0 = target_coeffs[:, :, k, 0].real
+                ti0 = target_coeffs[:, :, k, 0].imag
+                re_k = 2 * re_k - (pr0 * tr0 + pi0 * ti0)
+                im_k = 2 * im_k - (pr0 * ti0 - pi0 * tr0)
 
-            # Coherence = |cross_spec| / sqrt(PSD_pred * PSD_target)
-            # Use .real/.imag instead of torch.abs to avoid CUDA driver error on complex tensors
-            cross_spec_magnitude = (cross_spec_k.real ** 2 + cross_spec_k.imag ** 2).sqrt()
+            cross_spec_magnitude = (re_k ** 2 + im_k ** 2).sqrt()
             denom = torch.sqrt(pred_psd[:, :, k] * target_psd[:, :, k] + eps)
             coh_k = cross_spec_magnitude / (denom + eps)
 
