@@ -218,7 +218,9 @@ class AMSELoss(torch.nn.Module):
                 f"pred_psd: {torch.isnan(pred_psd).any()}, "
                 f"target_psd: {torch.isnan(target_psd).any()}"
             )
-            # Return a fallback large loss instead of NaN to prevent training crash
-            loss = torch.tensor(1e6, dtype=loss.dtype, device=loss.device)
+            # Return zero loss with grad_fn so backward() can proceed without crashing.
+            # torch.tensor(...) would create a detached leaf with requires_grad=False,
+            # which causes "element 0 of tensors does not require grad" in backward.
+            loss = prediction.mean() * 0.0
 
         return loss
