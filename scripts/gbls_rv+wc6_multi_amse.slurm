@@ -4,10 +4,10 @@
 #SBATCH --account=eccc_pegasus_mrd__gpu_a100
 #SBATCH --partition=gpu_a100
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=8
+#SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=2
-#SBATCH --gres=gpu:8
-#SBATCH --mem=512G
+#SBATCH --gres=gpu:4
+#SBATCH --mem=256G
 #SBATCH --time=12:00:00
 #SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
 #SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
@@ -74,7 +74,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
   --training.learning_rate 0.000005 \
-  --data.batch_size 8 \
+  --data.batch_size 4 \
   --data.dt 3600 \
   --data.dt_solver 60 \
   --model.paradis.hidden_dim 96 \
@@ -90,7 +90,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --start_ckpt "/space/hall0/work/eccc/mrd/rpnatm/avg000/Trained_weights_and_Graphs/20260817_run7/gbls_rv+wc6_multi_20260817_224458/version_0/checkpoints/pretrain-epoch=83-val_loss=0.1094.ckpt" \
   --train_ic_dict '{"precomputed_gbells_h_rv": [1536, "'"$TRAIN_DIR"'/ref_random/gbells_h_rv_60.0_20260803"], "precomputed_wc6_matched": [512, "'"$TRAIN_DIR"'/wc6/matched/williamson_case6_r4_60.0_20260804"]}' \
   --val_ic_dict   '{"precomputed_gbells_h_rv": [96,   "'"$VAL_DIR"'/ref_random/gbells_h_rv_60.0_20260804"],  "precomputed_wc6_matched": [32,  "'"$VAL_DIR"'/wc6/matched/williamson_case6_r4_60.0_20260804"]}' \
-  --devices 8 \
+  --devices 4 \
   --data.num_workers 2 \
   --training.gradient_checkpointing true \
   2>&1 | tee -a "$LOGFILE"
