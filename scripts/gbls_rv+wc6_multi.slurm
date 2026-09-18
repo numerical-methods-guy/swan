@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=2    # unchanged; total CPUs = 4*2=8 (was 16, halved for QOSGrpCpuLimit)
 #SBATCH --gres=gpu:4         # halved from 8
 #SBATCH --mem=256G           # halved from 512G (64G/GPU ratio maintained)
-#SBATCH --time=48:00:00
+#SBATCH --time=09:30:00
 #SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
 #SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
 
