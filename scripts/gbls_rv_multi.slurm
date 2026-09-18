@@ -71,10 +71,10 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --config config_paradis.yaml \
   --training.save_dir "$SAVEDIR" \
   --experiment.name gbls_rv_multi_${TS} \
-  --training.pretrain_epochs 200 \
+  --training.pretrain_epochs 125 \
   --training.finetune_epochs 0 \
-  --training.learning_rate 0.00001 \
-  --data.batch_size 2 \
+  --training.learning_rate 0.00002 \
+  --data.batch_size 4 \
   --data.dt 3600 \
   --data.dt_solver 60 \
   --model.paradis.hidden_dim 96 \
@@ -84,7 +84,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --model.paradis.diffusion_size 48 \
   --model.paradis.reaction_size 24 \
   --model.paradis.bias_channels 6 \
-  --n_rollout_steps 16 \
+  --n_rollout_steps 8 \
   --input_step_idx 8 \
   --start_ckpt "/space/hall0/work/eccc/mrd/rpnatm/avg000/Trained_weights_and_Graphs/20260804_run2/swan_precomp_20260804_052318/version_0/checkpoints/pretrain-epoch=96-val_loss=0.0837.ckpt" \
   --train_ic_dict '{"precomputed_gbells_h_rv": [2048, "'"$TRAIN_DIR"'/ref_random/gbells_h_rv_60.0_20260803"]}' \
