@@ -74,7 +74,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --training.pretrain_epochs 125 \
   --training.finetune_epochs 0 \
   --training.learning_rate 0.0000001 \
-  --data.batch_size 4 \
+  --data.batch_size 16 \
   --data.dt 3600 \
   --data.dt_solver 60 \
   --model.paradis.hidden_dim 96 \
