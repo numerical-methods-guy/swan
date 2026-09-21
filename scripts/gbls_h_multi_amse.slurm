@@ -74,7 +74,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
   --training.learning_rate 0.000005 \
-  --data.batch_size 4 \  # halved from 8 (1 sample/GPU ratio maintained)
+  --data.batch_size 16 \
   --data.dt 3600 \
   --data.dt_solver 60 \
   --model.paradis.hidden_dim 96 \
@@ -90,7 +90,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --start_ckpt "/space/hall0/work/eccc/mrd/rpnatm/avg000/Trained_weights_and_Graphs/20260818_run6/gbls_h_multi_20260818_101508/version_0/checkpoints/pretrain-epoch=98-val_loss=0.1393.ckpt" \
   --train_ic_dict '{"precomputed_gbells_h": [2048, "'"$TRAIN_DIR"'/gbells_h_60.0_20260803"]}' \
   --val_ic_dict   '{"precomputed_gbells_h": [128,  "'"$VAL_DIR"'/gbells_h_60.0_20260803"]}' \
-  --devices 4 \  # halved from 8; matches ntasks-per-node and gres
+  --devices 4 \
   --data.num_workers 2 \
   --training.gradient_checkpointing true \
   2>&1 | tee -a "$LOGFILE"
