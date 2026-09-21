@@ -143,7 +143,7 @@ class AMSELoss(torch.nn.Module):
                 re_k = 2 * re_k - (pr0 * tr0 + pi0 * ti0)
                 im_k = 2 * im_k - (pr0 * ti0 - pi0 * tr0)
 
-            cross_spec_magnitude = (re_k ** 2 + im_k ** 2).sqrt()
+            cross_spec_magnitude = (re_k ** 2 + im_k ** 2 + eps).sqrt()
             denom = torch.sqrt(pred_psd[:, :, k] * target_psd[:, :, k] + eps)
             coh_k = cross_spec_magnitude / (denom + eps)
 
