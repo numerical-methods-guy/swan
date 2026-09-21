@@ -218,9 +218,9 @@ class AMSELoss(torch.nn.Module):
                 f"pred_psd: {torch.isnan(pred_psd).any()}, "
                 f"target_psd: {torch.isnan(target_psd).any()}"
             )
-            # Return zero loss with grad_fn so backward() can proceed without crashing.
-            # torch.tensor(...) would create a detached leaf with requires_grad=False,
-            # which causes "element 0 of tensors does not require grad" in backward.
-            loss = prediction.mean() * 0.0
+            # Return zero loss with grad_fn. prediction.mean()*0 breaks when prediction
+            # is NaN (NaN*0=NaN in IEEE). Use (pred - pred.detach()) instead: this is
+            # always exactly 0 with a valid grad_fn regardless of prediction's values.
+            loss = (prediction - prediction.detach()).mean()
 
         return loss
