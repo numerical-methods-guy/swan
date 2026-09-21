@@ -73,7 +73,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --experiment.name gbls_rv_multi_amse_${TS} \
   --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
-  --training.learning_rate 0.000005 \
+  --training.learning_rate 0.00000005 \
   --data.batch_size 16 \
   --data.dt 3600 \
   --data.dt_solver 60 \
