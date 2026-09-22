@@ -1,19 +1,19 @@
 #!/bin/bash
 BASE="/space/hall0/work/eccc/mrd/rpnatm/avg000/Trained_weights_and_Graphs"
-AMSE_DIR="$BASE/amse_$(date +%Y%m%d)"
+AMSE_DIR="$BASE/amse_$(date +%Y%m%d)_2"
 VAL_DIR="/fs/hestia_Heccc/rpnatm/avg000/work/datasets/val"
 REPO="/home/avg000/swan"
 PY="/home/avg000/miniconda3/envs/swan/bin/python"
 
 # AMSE-trained checkpoints — set to "None" until a run completes
 declare -A CKPTS
-CKPTS[amse_h_wc6]="None"
+CKPTS[amse_h_wc6]="$BASE/20260921_run8/gbls_h+wc6_multi_amse_20260921_202608/version_0/checkpoints/pretrain-epoch=99-val_loss=0.0069.ckpt"
 CKPTS[amse_h]="$BASE/20260922_run1/gbls_h_multi_amse_20260922_045509/version_0/checkpoints/pretrain-epoch=99-val_loss=0.0991.ckpt"
 CKPTS[amse_rv]="None"
 CKPTS[amse_rv_wc6]="None"
 
 declare -A STATS
-STATS[amse_h_wc6]="None"
+STATS[amse_h_wc6]="$BASE/20260921_run8/stats.pt"
 STATS[amse_h]="$BASE/20260922_run1/stats.pt"
 STATS[amse_rv]="None"
 STATS[amse_rv_wc6]="None"
@@ -26,25 +26,25 @@ DATASETS[wc6_rv_matched]="$VAL_DIR/wc6/rv_matched/williamson_case6_r4_60.0_20260
 DATASETS[wc2]="/fs/hestia_Heccc/rpnatm/avg000/work/datasets/train/wc2_alpha0_forecast/williamson_case2_60.0_20260814"
 
 declare -A IC_IDX
-IC_IDX[amse_h_wc6_gbells_h]=29
-IC_IDX[amse_h_wc6_gbells_h_rv]=29
-IC_IDX[amse_h_wc6_wc6_matched]=29
-IC_IDX[amse_h_wc6_wc6_rv_matched]=29
+IC_IDX[amse_h_wc6_gbells_h]=47
+IC_IDX[amse_h_wc6_gbells_h_rv]=47
+IC_IDX[amse_h_wc6_wc6_matched]=47
+IC_IDX[amse_h_wc6_wc6_rv_matched]=47
 IC_IDX[amse_h_wc6_wc2]=0
-IC_IDX[amse_h_gbells_h]=29
-IC_IDX[amse_h_gbells_h_rv]=29
-IC_IDX[amse_h_wc6_matched]=29
-IC_IDX[amse_h_wc6_rv_matched]=29
+IC_IDX[amse_h_gbells_h]=47
+IC_IDX[amse_h_gbells_h_rv]=47
+IC_IDX[amse_h_wc6_matched]=47
+IC_IDX[amse_h_wc6_rv_matched]=47
 IC_IDX[amse_h_wc2]=0
-IC_IDX[amse_rv_gbells_h]=29
-IC_IDX[amse_rv_gbells_h_rv]=29
-IC_IDX[amse_rv_wc6_matched]=29
-IC_IDX[amse_rv_wc6_rv_matched]=29
+IC_IDX[amse_rv_gbells_h]=47
+IC_IDX[amse_rv_gbells_h_rv]=47
+IC_IDX[amse_rv_wc6_matched]=47
+IC_IDX[amse_rv_wc6_rv_matched]=47
 IC_IDX[amse_rv_wc2]=0
-IC_IDX[amse_rv_wc6_gbells_h]=29
-IC_IDX[amse_rv_wc6_gbells_h_rv]=29
-IC_IDX[amse_rv_wc6_wc6_matched]=29
-IC_IDX[amse_rv_wc6_wc6_rv_matched]=29
+IC_IDX[amse_rv_wc6_gbells_h]=47
+IC_IDX[amse_rv_wc6_gbells_h_rv]=47
+IC_IDX[amse_rv_wc6_wc6_matched]=47
+IC_IDX[amse_rv_wc6_wc6_rv_matched]=47
 IC_IDX[amse_rv_wc6_wc2]=0
 
 mkdir -p "$AMSE_DIR"
