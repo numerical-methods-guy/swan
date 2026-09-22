@@ -7,13 +7,13 @@ PY="/home/avg000/miniconda3/envs/swan/bin/python"
 
 # AMSE-trained checkpoints — set to "None" until a run completes
 declare -A CKPTS
-CKPTS[amse_h_wc6]="$BASE/20260921_run8/gbls_h+wc6_multi_amse_20260921_202608/version_0/checkpoints/pretrain-epoch=99-val_loss=0.0069.ckpt"
-CKPTS[amse_h]="$BASE/20260922_run1/gbls_h_multi_amse_20260922_045509/version_0/checkpoints/pretrain-epoch=89-val_loss=0.1014.ckpt"
+CKPTS[amse_h_wc6]="None"
+CKPTS[amse_h]="$BASE/20260922_run1/gbls_h_multi_amse_20260922_045509/version_0/checkpoints/pretrain-epoch=99-val_loss=0.0991.ckpt"
 CKPTS[amse_rv]="None"
 CKPTS[amse_rv_wc6]="None"
 
 declare -A STATS
-STATS[amse_h_wc6]="$BASE/20260921_run8/stats.pt"
+STATS[amse_h_wc6]="None"
 STATS[amse_h]="$BASE/20260922_run1/stats.pt"
 STATS[amse_rv]="None"
 STATS[amse_rv_wc6]="None"
