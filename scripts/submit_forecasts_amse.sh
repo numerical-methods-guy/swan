@@ -73,7 +73,7 @@ for RUN in amse_h_wc6 amse_h amse_rv amse_rv_wc6; do
         --account=eccc_pegasus_mrd__gpu_a100 \
         --partition=gpu_a100 \
         --nodes=1 --ntasks=1 --cpus-per-task=4 --gres=gpu:1 \
-        --mem=40G --time=01:00:00 \
+        --mem=40G --time=00:10:00 \
         --output="/fs/hestia_Heccc/rpnatm/avg000/work/logs/fc_${RUN}_${DS}_ch${CH}_%j.log" \
         --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04" \
         --wrap="cd $REPO && CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$REPO $PY forecast.py \
