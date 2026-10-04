@@ -68,17 +68,7 @@ cp "$0" "$SAVEDIR/gbls_h+wc6_6h_multi_${TS}.slurm"
 mkdir -p "$REPO/old_scripts/${DATE}" || true
 cp "$0" "$REPO/old_scripts/${DATE}/gbls_h+wc6_6h_multi_${TS}.slurm" || true
 
-# Find best checkpoint from the single_2 run (either 20261003_run2 or 20261004_run1)
-CKPT=$(find "$BASE_SAVEDIR/20261003_run2" "$BASE_SAVEDIR/20261004_run1" \
-  -path "*/gbls_h+wc6_6h_single_2_*/version_0/checkpoints/pretrain-epoch=*-val_loss=*.ckpt" \
-  2>/dev/null \
-  | sort -t= -k3 -n | head -1)
-
-if [[ -z "$CKPT" ]]; then
-  echo "ERROR: could not find best checkpoint from single_2 run" | tee -a "$LOGFILE"
-  exit 1
-fi
-
+CKPT="/space/hall0/work/eccc/mrd/rpnatm/avg000/Trained_weights_and_Graphs/20261004_run1/gbls_h+wc6_6h_single_2_20261004_053603/version_0/checkpoints/pretrain-epoch=102-val_loss=0.4169.ckpt"
 echo "Using checkpoint: $CKPT" | tee -a "$LOGFILE"
 
 export PYTHONPATH="$REPO"
