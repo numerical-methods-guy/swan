@@ -72,7 +72,7 @@ cp "$0" "$REPO/old_scripts/${DATE}/gbls_h+wc6_6h_multi_${TS}.slurm" || true
 CKPT=$(find "$BASE_SAVEDIR/20261003_run2" "$BASE_SAVEDIR/20261004_run1" \
   -path "*/gbls_h+wc6_6h_single_2_*/version_0/checkpoints/pretrain-epoch=*-val_loss=*.ckpt" \
   2>/dev/null \
-  | sort -t= -k4 -n | head -1)
+  | sort -t= -k3 -n | head -1)
 
 if [[ -z "$CKPT" ]]; then
   echo "ERROR: could not find best checkpoint from single_2 run" | tee -a "$LOGFILE"
