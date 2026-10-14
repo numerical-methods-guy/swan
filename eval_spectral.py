@@ -51,6 +51,8 @@ def main():
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--steps', type=int, nargs='+', default=[1, 5, 10, 20, 30, 40])
     parser.add_argument('--tag', type=str, default='')
+    parser.add_argument('--per_step', action='store_true',
+                        help='Save one figure per step instead of overlaying all steps')
     args = parser.parse_args()
 
     out_dir = args.output_dir or args.forecast_dir
@@ -110,6 +112,40 @@ def main():
     steps_done = sorted(results.keys())
     colors = plt.cm.plasma(np.linspace(0.1, 0.9, len(steps_done)))
     tag = f'_{args.tag}' if args.tag else ''
+
+    if args.per_step:
+        per_step_dir = os.path.join(out_dir, 'per_step')
+        os.makedirs(per_step_dir, exist_ok=True)
+        for step in steps_done:
+            r = results[step]
+            fig, axes = plt.subplots(3, 3, figsize=(15, 12))
+            for ci, ch in enumerate(channel_names):
+                axes[ci, 0].plot(degree[1:], r['coherence'][ci, 1:], linewidth=1.5)
+                axes[ci, 0].axhline(0.5, color='k', linestyle='--', linewidth=0.8, alpha=0.5)
+                axes[ci, 0].set_ylim(0, 1)
+                axes[ci, 0].set_title(f'{ch} coherence')
+                axes[ci, 0].set_xlabel('Degree $l$')
+                axes[ci, 0].grid(True, alpha=0.3)
+
+                axes[ci, 1].semilogy(degree[1:], r['psd_pred'][ci, 1:], label='pred', linewidth=1.5)
+                axes[ci, 1].semilogy(degree[1:], r['psd_true'][ci, 1:], label='truth', linestyle='--', linewidth=1.5)
+                axes[ci, 1].set_title(f'{ch} PSD')
+                axes[ci, 1].set_xlabel('Degree $l$')
+                axes[ci, 1].legend(fontsize=8)
+                axes[ci, 1].grid(True, alpha=0.3, which='both')
+
+                axes[ci, 2].plot(degree[1:], r['amp_ratio'][ci, 1:], linewidth=1.5)
+                axes[ci, 2].axhline(1.0, color='k', linestyle='--', linewidth=0.8, alpha=0.5)
+                axes[ci, 2].set_title(f'{ch} amp ratio')
+                axes[ci, 2].set_xlabel('Degree $l$')
+                axes[ci, 2].grid(True, alpha=0.3)
+
+            fig.suptitle(f'Step {step} (t={step}h)', fontsize=14)
+            plt.tight_layout()
+            plt.savefig(os.path.join(per_step_dir, f'step_{step:02d}{tag}.png'), dpi=120, bbox_inches='tight')
+            plt.close()
+        print(f'Per-step plots saved to {per_step_dir}')
+        return
 
     # Coherence plot
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
