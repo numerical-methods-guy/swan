@@ -79,7 +79,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --experiment.name gbls_h+wc6_6h_multi_L24_${TS} \
   --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
-  --training.learning_rate 0.00000008 \
+  --training.learning_rate 0.000003 \
   --data.batch_size 4 \
   --data.dt 21600 \
   --data.dt_solver 60 \
