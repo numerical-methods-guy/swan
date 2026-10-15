@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --gres=gpu:8
 #SBATCH --mem=256G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
 #SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
 
@@ -80,7 +80,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
   --training.learning_rate 0.00000008 \
-  --data.batch_size 8 \
+  --data.batch_size 4 \
   --data.dt 21600 \
   --data.dt_solver 60 \
   --model.paradis.hidden_dim 96 \
