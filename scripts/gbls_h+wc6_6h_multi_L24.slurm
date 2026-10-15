@@ -72,6 +72,7 @@ CKPT="/space/hall0/work/eccc/mrd/rpnatm/avg000/Trained_weights_and_Graphs/202610
 echo "Using checkpoint: $CKPT" | tee -a "$LOGFILE"
 
 export PYTHONPATH="$REPO"
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 srun --cpus-per-task=2 $PY Training/train.py \
   --config config_paradis.yaml \
   --training.save_dir "$SAVEDIR" \
