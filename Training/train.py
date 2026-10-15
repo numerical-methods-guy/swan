@@ -184,6 +184,13 @@ class SWELightningModule(pl.LightningModule):
         for k in range(1, n_steps):
             cur_winds = self._fields_to_winds(prd)
             prd = self.model(prd, cur_winds)
+            if torch.isnan(prd).any() or torch.isinf(prd).any():
+                import logging
+                logging.warning(
+                    f"NaN/Inf in model output at step {k}, batch {batch_idx}: "
+                    f"prd min={prd[~torch.isnan(prd)].min().item() if not torch.isnan(prd).all() else 'all-nan'} "
+                    f"max={prd[~torch.isnan(prd)].max().item() if not torch.isnan(prd).all() else 'all-nan'}"
+                )
             total_loss = total_loss + self.loss_fn(prd, tar_fields[:, k])
         loss = total_loss / n_steps
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
