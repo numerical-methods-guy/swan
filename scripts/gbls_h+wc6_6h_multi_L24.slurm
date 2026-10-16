@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --gres=gpu:8
 #SBATCH --mem=256G
-#SBATCH --time=48:00:00
+#SBATCH --time=55:00:00
 #SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
 #SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
 
@@ -77,7 +77,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --config config_paradis.yaml \
   --training.save_dir "$SAVEDIR" \
   --experiment.name gbls_h+wc6_6h_multi_L24_${TS} \
-  --training.pretrain_epochs 100 \
+  --training.pretrain_epochs 300 \
   --training.finetune_epochs 0 \
   --training.learning_rate 0.000003 \
   --data.batch_size 4 \
@@ -90,7 +90,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --model.paradis.diffusion_size 48 \
   --model.paradis.reaction_size 24 \
   --model.paradis.bias_channels 6 \
-  --n_rollout_steps 8 \
+  --n_rollout_steps 12 \
   --input_step_idx 2 \
   --start_ckpt "$CKPT" \
   --train_ic_dict '{"precomputed_gbells_h": [1536, "'"$TRAIN_DIR_GBELLS"'/gbells_h_60.0_20261002"], "precomputed_wc6_matched": [512, "'"$TRAIN_DIR_WC6"'/wc6/matched/williamson_case6_r4_60.0_20260930"]}' \
