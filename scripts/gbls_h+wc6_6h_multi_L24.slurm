@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --gres=gpu:8
 #SBATCH --mem=256G
-#SBATCH --time=55:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
 #SBATCH --comment="image=registry.maze.science.gc.ca/ssc-hpcs/generic-job:ubuntu22.04"
 
@@ -77,7 +77,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --config config_paradis.yaml \
   --training.save_dir "$SAVEDIR" \
   --experiment.name gbls_h+wc6_6h_multi_L24_${TS} \
-  --training.pretrain_epochs 300 \
+  --training.pretrain_epochs 100 \
   --training.finetune_epochs 0 \
   --training.learning_rate 0.000003 \
   --data.batch_size 4 \
