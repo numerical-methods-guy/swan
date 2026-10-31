@@ -73,7 +73,7 @@ srun --cpus-per-task=2 $PY Training/train.py \
   --config config_paradis.yaml \
   --training.save_dir "$SAVEDIR" \
   --experiment.name gbls_h+wc6_6h_single_L24_correct_base_dt_${TS} \
-  --training.pretrain_epochs 300 \
+  --training.pretrain_epochs 700 \
   --training.finetune_epochs 0 \
   --training.learning_rate 0.00009 \
   --data.batch_size 16 \
