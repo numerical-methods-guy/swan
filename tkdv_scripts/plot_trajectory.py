@@ -10,10 +10,11 @@ import matplotlib.pyplot as plt
 
 from kdv.tkdv_solver import TKdVSolver
 
-# --- Cases: (label, D, theta, N, out_filename) ---
+# --- Cases: (label, D, theta, dt_snapshot, nsteps_per_snapshot, N, out_filename) ---
+# dt_snapshot: time between saved frames; nsteps_per_snapshot: solver sub-steps per frame
 CASES = [
-    ("upstream",   1.0,  -0.5,  0.01,  200, "trajectory_upstream.png"),
-    ("downstream", 0.24, -0.32, 0.001,  50, "trajectory_downstream.png"),
+    ("upstream",   1.0,  -0.5,  0.01, 1,  200, "trajectory_upstream.png"),
+    ("downstream", 0.24, -0.32, 0.01, 10,  50, "trajectory_downstream.png"),
 ]
 
 J      = 32
@@ -23,11 +24,12 @@ burnin = 1000
 thin   = 10
 
 
-def run_case(label, D, theta, dt, N, out_fname):
+def run_case(label, D, theta, dt_snapshot, nsteps, N, out_fname):
+    dt_solver = dt_snapshot / nsteps
     out_png = os.path.join(os.path.dirname(__file__), out_fname)
-    print(f"\n=== {label.upper()} (D={D}, θ={theta}, dt={dt}) ===")
+    print(f"\n=== {label.upper()} (D={D}, θ={theta}, dt_snapshot={dt_snapshot}, nsteps={nsteps}) ===")
 
-    solver = TKdVSolver(J=J, dt=dt, D=D, E0=E0, L0=L0)
+    solver = TKdVSolver(J=J, dt=dt_solver, D=D, E0=E0, L0=L0)
 
     print("Sampling Gibbs IC ...")
     with torch.no_grad():
@@ -45,11 +47,11 @@ def run_case(label, D, theta, dt, N, out_fname):
             frames.append(solver.spec2phys(u_hat_cur).numpy())
             energies.append(solver.energy(u_hat_cur).item())
             if step < N:
-                u_hat_cur = solver.timestep(u_hat_cur, nsteps=1)
+                u_hat_cur = solver.timestep(u_hat_cur, nsteps=nsteps)
 
     H_final = solver.hamiltonian(u_hat_cur).item()
     U = np.stack(frames, axis=0)   # (N+1, J)
-    t_arr = np.arange(N + 1) * dt
+    t_arr = np.arange(N + 1) * dt_snapshot
     x_arr = solver.x.numpy()
 
     print(f"Mean energy : {np.mean(energies):.6f}  (should be ~1.0)")
