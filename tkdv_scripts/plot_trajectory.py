@@ -14,7 +14,7 @@ from kdv.tkdv_solver import TKdVSolver
 # dt_snapshot: time between saved frames; nsteps_per_snapshot: solver sub-steps per frame
 CASES = [
     ("upstream",   1.0,  -0.5,  0.01, 1,  200, "trajectory_upstream.png"),
-    ("downstream", 0.24, -0.32, 0.001, 1,  50, "trajectory_downstream.png"),
+    ("downstream", 0.5, -0.32, 0.01, 1,  50, "trajectory_downstream.png"),
 ]
 
 J      = 32
