@@ -1,5 +1,6 @@
 import sys
-sys.path.insert(0, r"C:\Users\neeong\swan")
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import torch
@@ -20,7 +21,7 @@ N       = 200        # number of steps to save (T = N * dt = 2.0)
 burnin  = 1000
 thin    = 10
 
-OUT_PNG = r"C:\Users\neeong\swan\tkdv_scripts\trajectory_D1.png"
+OUT_PNG = os.path.join(os.path.dirname(__file__), "trajectory_D1.png")
 
 # --- Build solver ---
 solver = TKdVSolver(J=J, dt=dt, D=D, E0=E0, L0=L0)
