@@ -65,9 +65,13 @@ fig, axes = plt.subplots(2, 1, figsize=(12, 5),
 
 # Top: space-time heatmap, x on y-axis, t on x-axis
 vmax = np.abs(U).max()
-pcm = axes[0].pcolormesh(
-    t_arr, x_arr, U.T,
-    cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="auto"
+pcm = axes[0].imshow(
+    U.T,
+    aspect="auto",
+    origin="lower",
+    extent=[t_arr[0], t_arr[-1], x_arr[0], x_arr[-1]],
+    cmap="seismic", vmin=-vmax, vmax=vmax,
+    interpolation="bicubic",
 )
 axes[0].set_ylabel("x")
 axes[0].set_title(f"Time series of u(x,t)  [D={D}, E0={E0}, L0={L0}, θ={theta}]")
