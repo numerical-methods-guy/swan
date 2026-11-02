@@ -12,21 +12,20 @@ from kdv.tkdv_solver import TKdVSolver
 
 # --- Cases: (label, D, theta, N, out_filename) ---
 CASES = [
-    ("upstream",   1.0,  -0.5, 200, "trajectory_upstream.png"),
-    ("downstream", 0.24, -0.32, 50, "trajectory_downstream.png"),
+    ("upstream",   1.0,  -0.5,  0.01,  200, "trajectory_upstream.png"),
+    ("downstream", 0.24, -0.32, 0.001,  50, "trajectory_downstream.png"),
 ]
 
 J      = 32
-dt     = 0.01
 E0     = 100.0
 L0     = 6.0
 burnin = 1000
 thin   = 10
 
 
-def run_case(label, D, theta, N, out_fname):
+def run_case(label, D, theta, dt, N, out_fname):
     out_png = os.path.join(os.path.dirname(__file__), out_fname)
-    print(f"\n=== {label.upper()} (D={D}, θ={theta}) ===")
+    print(f"\n=== {label.upper()} (D={D}, θ={theta}, dt={dt}) ===")
 
     solver = TKdVSolver(J=J, dt=dt, D=D, E0=E0, L0=L0)
 
