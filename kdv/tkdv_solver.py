@@ -94,6 +94,24 @@ class TKdVSolver(nn.Module):
         # irfft expects unnormalised coefficients, so multiply back by J
         return torch.fft.irfft(u_hat_full * self.J, n=self.J, dim=-1)
 
+    def _quadratic_dealiased(self, u_hat: torch.Tensor) -> torch.Tensor:
+        """
+        Compute spectral coefficients of P_Lambda(u^2/2) using 3/2-rule dealiasing.
+
+        Pads to J_pad = 3*Lambda grid points before squaring to prevent aliasing
+        of the quadratic nonlinearity back into the resolved modes k=1..Lambda.
+        """
+        J_pad = 3 * self.Lambda  # dealiased grid size
+        # Build padded rfft buffer: k=0 zero, k=1..Lambda from u_hat, rest zero
+        shape = list(u_hat.shape[:-1]) + [J_pad // 2 + 1]
+        buf = torch.zeros(shape, dtype=u_hat.dtype, device=u_hat.device)
+        buf[..., 1:self.Lambda + 1] = u_hat
+        # irfft(buf * J_pad) = sum_k u_hat[k] exp(2pi*i*k*j/J_pad): physical values on J_pad pts
+        u_phys = torch.fft.irfft(buf * J_pad, n=J_pad, dim=-1)
+        # square, transform back, truncate to k=1..Lambda
+        u2_hat_full = torch.fft.rfft(u_phys ** 2 / 2, dim=-1) / J_pad
+        return u2_hat_full[..., 1:self.Lambda + 1]
+
     def dudt(self, u_hat: torch.Tensor) -> torch.Tensor:
         """
         RHS of the tKdV equation in spectral space.
@@ -104,9 +122,8 @@ class TKdVSolver(nn.Module):
         Returns:
             du_hat/dt: same shape as u_hat
         """
-        # nonlinear term: -ik * h3_pde * P_Lambda(u^2/2)_hat[k]
-        u = self.spec2phys(u_hat)
-        u2_hat = self.phys2spec(u ** 2 / 2)
+        # nonlinear term: -ik * h3_pde * P_Lambda(u^2/2)_hat[k]  (dealiased)
+        u2_hat = self._quadratic_dealiased(u_hat)
         nonlinear = -1j * self.k * self.h3_pde * u2_hat
 
         # linear dispersion term: +ik^3 * h2_pde * u_hat[k]  (since (ik)^3 = -ik^3, negating gives +ik^3)
