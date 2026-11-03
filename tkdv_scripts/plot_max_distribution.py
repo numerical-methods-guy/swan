@@ -19,8 +19,8 @@ BURNIN   = 1000
 THIN     = 10
 
 CASES = [
-    ("upstream",   1.0,  -0.5,  0.01, 200),
-    ("downstream", 0.24, -0.32, 0.01,  50),
+    ("upstream",   1.0,  -0.5,  0.01, 50),
+    ("downstream", 0.24, -0.32, 0.01, 50),
 ]
 
 OUT_PNG = os.path.join(os.path.dirname(__file__), "max_distribution.png")
@@ -67,22 +67,27 @@ results = {}
 for label, D, theta, dt, N in CASES:
     results[label] = max_amplitudes(label, D, theta, dt, N)
 
-# --- Plot ---
-fig, axes = plt.subplots(1, 2, figsize=(12, 4), sharey=False)
+# --- Plot: overlaid ---
+fig, ax = plt.subplots(figsize=(10, 5))
 
 colors = {"upstream": "steelblue", "downstream": "crimson"}
-for ax, (label, vals) in zip(axes, results.items()):
-    ax.hist(vals, bins=50, color=colors[label], alpha=0.8, edgecolor="white", lw=0.3)
-    ax.axvline(np.percentile(vals, 95), color="k", ls="--", lw=1, label="p95")
-    ax.axvline(np.percentile(vals, 99), color="k", ls=":",  lw=1, label="p99")
-    ax.set_xlabel("max |u(x,t)|")
-    ax.set_ylabel("count")
-    D_val = dict(zip([c[0] for c in CASES], [c[1] for c in CASES]))[label]
-    theta_val = dict(zip([c[0] for c in CASES], [c[2] for c in CASES]))[label]
-    ax.set_title(f"{label}  [D={D_val}, θ={theta_val}]")
-    ax.legend()
+all_vals = np.concatenate(list(results.values()))
+bins = np.linspace(all_vals.min(), all_vals.max(), 60)
 
-fig.suptitle("Distribution of max amplitude over 1000 trajectories", fontsize=13)
+for label, vals in results.items():
+    D_val     = dict(zip([c[0] for c in CASES], [c[1] for c in CASES]))[label]
+    theta_val = dict(zip([c[0] for c in CASES], [c[2] for c in CASES]))[label]
+    ax.hist(vals, bins=bins, color=colors[label], alpha=0.55,
+            edgecolor="white", lw=0.3,
+            label=f"{label}  [D={D_val}, θ={theta_val}]")
+    ax.axvline(np.percentile(vals, 95), color=colors[label], ls="--", lw=1.2)
+    ax.axvline(np.percentile(vals, 99), color=colors[label], ls=":",  lw=1.2)
+
+ax.set_xlabel("max |u(x,t)|  over T=0.5")
+ax.set_ylabel("count")
+ax.set_yscale("log")
+ax.legend()
+fig.suptitle("Distribution of max amplitude — 1000 trajectories each, same T=0.5", fontsize=12)
 plt.tight_layout()
 plt.savefig(OUT_PNG, dpi=150)
 print(f"\nSaved to {OUT_PNG}")
