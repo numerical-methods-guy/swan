@@ -18,17 +18,22 @@ N_TRAJ   = 1000
 BURNIN   = 1000
 THIN     = 10
 
+DT_SNAPSHOT = 1.0       # "1 hour" in dimensionless units
+NSTEPS      = 60        # sub-steps per snapshot (dt_solver = 1/60 ≈ 0.01667)
+N_STEPS     = 12        # steps per trajectory  (T = 12 "hours")
+
 CASES = [
-    ("upstream",   1.0,  -0.5,  0.01, 50),
-    ("downstream", 0.24, -0.32, 0.01, 50),
+    ("upstream",   1.0,  -0.5,  DT_SNAPSHOT, NSTEPS, N_STEPS),
+    ("downstream", 0.24, -0.32, DT_SNAPSHOT, NSTEPS, N_STEPS),
 ]
 
 OUT_PNG = os.path.join(os.path.dirname(__file__), "max_distribution.png")
 
 
-def max_amplitudes(label, D, theta, dt, N):
-    print(f"\n=== {label.upper()} (D={D}, θ={theta}, N_traj={N_TRAJ}) ===")
-    solver = TKdVSolver(J=J, dt=dt, D=D, E0=E0, L0=L0)
+def max_amplitudes(label, D, theta, dt_snapshot, nsteps, N):
+    dt_solver = dt_snapshot / nsteps
+    print(f"\n=== {label.upper()} (D={D}, θ={theta}, dt_solver={dt_solver:.4f}, N={N}) ===")
+    solver = TKdVSolver(J=J, dt=dt_solver, D=D, E0=E0, L0=L0)
 
     # Sample N_TRAJ ICs from one long MCMC chain
     print("Sampling Gibbs ICs ...")
@@ -51,7 +56,7 @@ def max_amplitudes(label, D, theta, dt, N):
                 torch.maximum(max_vals, step_max)
             )
             if step < N:
-                u_hat_cur = solver.timestep(u_hat_cur, nsteps=1)
+                u_hat_cur = solver.timestep(u_hat_cur, nsteps=nsteps)
 
     vals = max_vals.numpy()
     n_nan = np.isnan(vals).sum()
@@ -64,8 +69,8 @@ def max_amplitudes(label, D, theta, dt, N):
 
 
 results = {}
-for label, D, theta, dt, N in CASES:
-    results[label] = max_amplitudes(label, D, theta, dt, N)
+for label, D, theta, dt_snapshot, nsteps, N in CASES:
+    results[label] = max_amplitudes(label, D, theta, dt_snapshot, nsteps, N)
 
 # --- Plot: overlaid ---
 fig, ax = plt.subplots(figsize=(10, 5))
@@ -87,7 +92,7 @@ ax.set_xlabel("max |u(x,t)|  over T=0.5")
 ax.set_ylabel("count")
 ax.set_yscale("log")
 ax.legend()
-fig.suptitle("Distribution of max amplitude — 1000 trajectories each, same T=0.5", fontsize=12)
+fig.suptitle(f"Distribution of max amplitude — 1000 trajectories each, T={N_STEPS} steps × dt={DT_SNAPSHOT} ({NSTEPS} sub-steps)", fontsize=12)
 plt.tight_layout()
 plt.savefig(OUT_PNG, dpi=150)
 print(f"\nSaved to {OUT_PNG}")
