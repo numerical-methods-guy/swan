@@ -19,7 +19,7 @@ BURNIN   = 1000
 THIN     = 10
 
 DT_SNAPSHOT = 1.0       # "1 hour" in dimensionless units
-NSTEPS      = 60        # sub-steps per snapshot (dt_solver = 1/60 ≈ 0.01667)
+NSTEPS      = 600       # sub-steps per snapshot (dt_solver = 1/600 ≈ 0.00167)
 N_STEPS     = 12        # steps per trajectory  (T = 12 "hours")
 
 CASES = [
