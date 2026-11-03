@@ -45,13 +45,22 @@ def max_amplitudes(label, D, theta, dt, N):
         for step in range(N + 1):
             u_phys = solver.spec2phys(u_hat_cur)          # (N_TRAJ, J)
             step_max = u_phys.abs().max(dim=-1).values     # (N_TRAJ,)
-            max_vals = torch.maximum(max_vals, step_max)
+            # propagate NaN for blown-up trajectories
+            max_vals = torch.where(
+                torch.isnan(step_max), torch.full_like(max_vals, float("nan")),
+                torch.maximum(max_vals, step_max)
+            )
             if step < N:
                 u_hat_cur = solver.timestep(u_hat_cur, nsteps=1)
 
-    print(f"Max amplitude stats: mean={max_vals.mean():.3f}, "
-          f"p95={max_vals.quantile(0.95):.3f}, max={max_vals.max():.3f}")
-    return max_vals.numpy()
+    vals = max_vals.numpy()
+    n_nan = np.isnan(vals).sum()
+    vals = vals[~np.isnan(vals)]
+    if n_nan > 0:
+        print(f"  (dropped {n_nan} blow-up trajectories, {len(vals)} remain)")
+    print(f"Max amplitude stats: mean={vals.mean():.3f}, "
+          f"p95={np.percentile(vals, 95):.3f}, max={vals.max():.3f}")
+    return vals
 
 
 results = {}
