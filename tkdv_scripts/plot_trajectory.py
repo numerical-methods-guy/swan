@@ -58,8 +58,8 @@ def run_case(label, D, theta, dt_snapshot, nsteps, N, out_fname):
     print(f"Mean energy : {np.mean(energies):.6f}  (should be ~1.0)")
     print(f"H drift     : {abs(H_final - H_init):.2e}")
 
-    fig, axes = plt.subplots(2, 1, figsize=(12, 5),
-                             gridspec_kw={"height_ratios": [3, 1.5]})
+    fig, axes = plt.subplots(3, 1, figsize=(12, 7),
+                             gridspec_kw={"height_ratios": [3, 1.5, 1.5]})
 
     vmax = np.abs(U).max()
     pcm = axes[0].imshow(
@@ -77,6 +77,15 @@ def run_case(label, D, theta, dt_snapshot, nsteps, N, out_fname):
     axes[1].set_ylabel("u")
     axes[1].set_title("Time series of u at x=0")
     axes[1].set_xlim(t_arr[0], t_arr[-1])
+
+    # Domain slice at T/2
+    mid = N // 2
+    axes[2].plot(x_arr, U[mid, :], lw=1.2, color="crimson")
+    axes[2].set_xlabel("x")
+    axes[2].set_ylabel("u")
+    axes[2].set_title(f"Domain slice u(x) at t={t_arr[mid]:.2f} (T/2)")
+    axes[2].set_xlim(x_arr[0], x_arr[-1])
+    axes[2].axhline(0, color="k", lw=0.5, ls="--")
 
     plt.tight_layout()
     plt.savefig(out_png, dpi=150)
