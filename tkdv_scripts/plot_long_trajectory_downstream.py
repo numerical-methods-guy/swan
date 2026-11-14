@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 from kdv.tkdv_solver import TKdVSolver
 
 J      = 33
-E0     = 100.0
-L0     = 6.0
+E0     = 60.0
+L0     = 3.0
 D      = 0.24
 theta  = -0.5
 burnin = 1000
