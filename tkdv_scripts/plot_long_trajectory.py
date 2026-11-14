@@ -25,7 +25,8 @@ sub_steps           = int(dt_snapshot / dt_solver)   # 60 sub-steps per frame
 
 out_png = os.path.join(os.path.dirname(__file__), "long_trajectory.png")
 
-solver = TKdVSolver(J=J, dt=dt_solver, D=D, E0=E0, L0=L0)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+solver = TKdVSolver(J=J, dt=dt_solver, D=D, E0=E0, L0=L0).to(device)
 
 print("Sampling Gibbs IC ...")
 with torch.no_grad():
@@ -40,7 +41,7 @@ H_init = solver.hamiltonian(u_hat).item()
 with torch.no_grad():
     u_hat_cur = u_hat.clone()
     for step in range(n_steps + 1):
-        frames.append(solver.spec2phys(u_hat_cur).numpy())
+        frames.append(solver.spec2phys(u_hat_cur).cpu().numpy())
         energies.append(solver.energy(u_hat_cur).item())
         if step < n_steps:
             u_hat_cur = solver.timestep(u_hat_cur, nsteps=sub_steps)
