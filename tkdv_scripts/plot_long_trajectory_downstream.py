@@ -18,7 +18,7 @@ theta  = -0.1  # sample IC from upstream Gibbs measure; D=0.24 gives downstream 
 burnin = 1000
 thin   = 10
 
-dt_solver           = 0.002
+dt_solver           = 0.001
 dt_snapshot         = 0.5
 n_steps             = 20
 sub_steps           = int(dt_snapshot / dt_solver)
