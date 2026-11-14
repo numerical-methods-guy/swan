@@ -14,7 +14,7 @@ J      = 33
 E0     = 60.0
 L0     = 3.0
 D      = 0.24
-theta  = -0.5
+theta  = -0.1  # sample IC from upstream Gibbs measure; D=0.24 gives downstream dynamics
 burnin = 1000
 thin   = 10
 
