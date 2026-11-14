@@ -135,7 +135,7 @@ class TKdVSolver(nn.Module):
         self,
         a: torch.Tensor,
         w: float,
-        n_iter: int = 20,
+        n_iter: int = 100,
     ) -> torch.Tensor:
         """
         Solve one implicit midpoint stage:
