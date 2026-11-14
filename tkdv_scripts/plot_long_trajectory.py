@@ -49,7 +49,7 @@ with torch.no_grad():
 H_final = solver.hamiltonian(u_hat_cur).item()
 U = np.stack(frames, axis=0)   # (n_steps+1, J)
 t_arr = np.arange(n_steps + 1) * dt_snapshot
-x_arr = solver.x.numpy()
+x_arr = solver.x.cpu().numpy()
 
 print(f"Mean energy : {np.mean(energies):.6f}  (should be ~1.0)")
 print(f"H drift     : {abs(H_final - H_init):.2e}")
