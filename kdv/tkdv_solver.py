@@ -18,7 +18,7 @@ class TKdVSolver(nn.Module):
 
     def __init__(
         self,
-        J: int = 32,
+        J: int = 33,
         dt: float = 0.01,
         D: float = 1.0,
         E0: float = 100.0,
@@ -26,7 +26,7 @@ class TKdVSolver(nn.Module):
     ):
         super().__init__()
 
-        assert J % 2 == 0, "J must be even"
+        assert J % 2 == 1, "J must be odd (J = 2*Lambda + 1)"
         self.J = J
         self.Lambda = J // 2
         self.dt = dt
