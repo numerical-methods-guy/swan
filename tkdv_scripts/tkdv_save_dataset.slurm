@@ -39,7 +39,7 @@ echo "" | tee -a "$LOGFILE"
 echo "=== Upstream case (D=1.0, n_steps=200) ===" | tee -a "$LOGFILE"
 $PY -m kdv.tkdv_dataset_saver \
     --ictype gibbs \
-    --J 32 \
+    --J 33 \
     --dt 0.01 \
     --dt_solver 0.01 \
     --dt_solver_ref 0.001 \
@@ -63,7 +63,7 @@ echo "" | tee -a "$LOGFILE"
 echo "=== Downstream case (D=0.24, n_steps=50) ===" | tee -a "$LOGFILE"
 $PY -m kdv.tkdv_dataset_saver \
     --ictype gibbs \
-    --J 32 \
+    --J 33 \
     --dt 0.01 \
     --dt_solver 0.01 \
     --dt_solver_ref 0.001 \
