@@ -19,8 +19,8 @@ burnin = 1000
 thin   = 10
 
 dt_solver           = 0.05
-dt_snapshot         = 30.0
-n_steps             = 40
+dt_snapshot         = 0.5
+n_steps             = 20
 sub_steps           = int(dt_snapshot / dt_solver)   # 60 sub-steps per frame
 
 out_png = os.path.join(os.path.dirname(__file__), "long_trajectory.png")
@@ -61,7 +61,7 @@ vmax = np.abs(U).max()
 pcm = axes[0].imshow(
     U.T, aspect="auto", origin="lower",
     extent=[t_arr[0], t_arr[-1], x_arr[0], x_arr[-1]],
-    cmap="seismic", vmin=-vmax, vmax=vmax, interpolation="bicubic",
+    cmap="RdYlBu_r", vmin=-vmax, vmax=vmax, interpolation="bicubic",
 )
 axes[0].set_ylabel("x")
 axes[0].set_title(f"Long trajectory  [D={D}, E0={E0}, L0={L0}, θ={theta}, T={t_arr[-1]:.0f}]")
