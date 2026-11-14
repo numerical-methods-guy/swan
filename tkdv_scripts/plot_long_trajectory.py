@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 from kdv.tkdv_solver import TKdVSolver
 
-J      = 33
+J      = 32
 E0     = 100.0
 L0     = 6.0
 D      = 1.0
@@ -18,7 +18,7 @@ theta  = -0.1
 burnin = 1000
 thin   = 10
 
-dt_solver           = 0.5
+dt_solver           = 0.05
 dt_snapshot         = 30.0
 n_steps             = 40
 sub_steps           = int(dt_snapshot / dt_solver)   # 60 sub-steps per frame
