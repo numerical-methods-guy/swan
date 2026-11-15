@@ -6,6 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:1
 #SBATCH --mem=8G
 #SBATCH --time=01:00:00
 #SBATCH --output=/fs/hestia_Heccc/rpnatm/avg000/work/logs/%j.log
@@ -37,8 +38,8 @@ echo "=== Stability check: dt=1.0 vs dt=0.001 (downstream D=0.24) ===" | tee -a 
 $PY -m kdv.tkdv_dataset_saver \
     --ictype gibbs \
     --J 32 \
-    --dt 1.0 \
-    --dt_solver 1.0 \
+    --dt 0.025 \
+    --dt_solver 0.025 \
     --dt_solver_ref 0.001 \
     --D 0.24 \
     --E0 100.0 \
@@ -46,12 +47,12 @@ $PY -m kdv.tkdv_dataset_saver \
     --theta -0.5 \
     --gibbs_burnin 1000 \
     --gibbs_thin 10 \
-    --n_samples 20 \
+    --n_samples 1 \
     --n_steps_per_trajectory 40 \
-    --n_stability_samples 20 \
+    --n_stability_samples 1 \
     --n_stability_steps 40 \
     --stability_threshold 0.01 \
-    --device cpu \
+    --device cuda \
     --save_dir "$SAVE_DIR" \
     2>&1 | tee -a "$LOGFILE"
 
