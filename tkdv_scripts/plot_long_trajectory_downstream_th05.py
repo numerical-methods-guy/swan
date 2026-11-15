@@ -19,7 +19,7 @@ burnin = 10000
 thin   = 10
 
 dt_solver           = 0.005
-dt_snapshot         = 2.0
+dt_snapshot         = 0.1
 n_steps             = 100
 sub_steps           = int(dt_snapshot / dt_solver)
 
