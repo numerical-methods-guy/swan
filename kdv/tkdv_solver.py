@@ -126,15 +126,18 @@ class TKdVSolver(nn.Module):
         M = 1.0 / (1.0 - (tau / 2.0) * Lk)
 
         z = a.clone() if z_init is None else z_init
+        err_t = torch.tensor(float('inf'), device=a.device, dtype=torch.float64)
         for i in range(n_iter):
             N_z = -1j * self.k * self.h3_pde * self._quadratic_dealiased(z) / 2.0
             z_new = M * (a + (tau / 2.0) * N_z)
-            err = (z_new - z).abs().pow(2).sum().item()
+            err_t = (z_new - z).abs().pow(2).sum()
             z = z_new
-            if err < tol:
+            # sync every 10 iters to avoid per-iter GPU→CPU stall
+            if i % 10 == 9 and err_t.item() < tol:
                 break
         else:
-            print(f"[WARN] Picard did not converge after {n_iter} iters, err={err:.2e}", flush=True)
+            if err_t.item() >= tol:
+                print(f"[WARN] Picard did not converge after {n_iter} iters, err={err_t.item():.2e}", flush=True)
 
         return 2.0 * z - a
 

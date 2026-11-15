@@ -30,6 +30,12 @@ echo "Time: $(date)"         | tee -a "$LOGFILE"
 export PYTHONPATH="$REPO"
 cd "$REPO"
 
+# Poll GPU utilisation every 5 s in background; kill it when the job ends
+nvidia-smi --query-gpu=timestamp,utilization.gpu,utilization.memory,memory.used,memory.total \
+           --format=csv --loop=5 >> "$LOGDIR/gpu_${SLURM_JOB_ID}.csv" 2>&1 &
+NVIDIA_PID=$!
+trap "kill $NVIDIA_PID 2>/dev/null" EXIT
+
 $PY -u tkdv_scripts/plot_long_trajectory_downstream_th05.py 2>&1 | tee -a "$LOGFILE"
 
 echo "DONE: $(date)" | tee -a "$LOGFILE"
