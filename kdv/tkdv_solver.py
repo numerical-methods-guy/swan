@@ -135,6 +135,7 @@ class TKdVSolver(nn.Module):
         self,
         a: torch.Tensor,
         w: float,
+        z_init: torch.Tensor = None,
         n_iter: int = 1000,
         tol: float = 1e-12,
     ) -> torch.Tensor:
@@ -152,7 +153,7 @@ class TKdVSolver(nn.Module):
         Lk = 1j * self.k ** 3 * self.h2_pde          # (Lambda,) linear eigenvalues
         M = 1.0 / (1.0 - (tau / 2.0) * Lk)           # exact linear inversion
 
-        z = a.clone()
+        z = a.clone() if z_init is None else z_init
         for _ in range(n_iter):
             N_z = -1j * self.k * self.h3_pde * self._quadratic_dealiased(z)
             z_new = M * (a + (tau / 2.0) * N_z)
@@ -175,21 +176,22 @@ class TKdVSolver(nn.Module):
 
         with w1 = w3 = (2 + 2^{1/3} + 2^{-1/3}) / 3,  w2 = 1 - 2*w1.
 
-        Args:
-            u_hat:  complex spectral coefficients, shape (..., Lambda)
-            nsteps: number of timesteps to take
-
-        Returns:
-            u_hat at time t + nsteps * dt, same shape
+        Uses quadratic extrapolation from previous stage outputs as initial
+        guess for each stage's Picard iteration to accelerate convergence.
         """
         w1 = (2.0 + 2.0 ** (1.0 / 3.0) + 2.0 ** (-1.0 / 3.0)) / 3.0
         w2 = 1.0 - 2.0 * w1
         w3 = w1
 
         for _ in range(nsteps):
+            # stage 1: no prior history, use z_init = a (default)
             y1 = self._solve_midpoint_stage(u_hat, w1)
-            y2 = self._solve_midpoint_stage(y1, w2)
-            u_hat = self._solve_midpoint_stage(y2, w3)
+            # stage 2: extrapolate midpoint from stage 1 output and input
+            z2_init = 1.5 * y1 - 0.5 * u_hat
+            y2 = self._solve_midpoint_stage(y1, w2, z_init=z2_init)
+            # stage 3: extrapolate midpoint from stage 2 output and stage 1 output
+            z3_init = 1.5 * y2 - 0.5 * y1
+            u_hat = self._solve_midpoint_stage(y2, w3, z_init=z3_init)
 
         return u_hat
 
