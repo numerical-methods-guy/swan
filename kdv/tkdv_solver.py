@@ -136,23 +136,42 @@ class TKdVSolver(nn.Module):
 
         return 2.0 * z - a
 
-    def timestep(self, u_hat: torch.Tensor, nsteps: int = 1) -> torch.Tensor:
+    def timestep(
+        self,
+        u_hat: torch.Tensor,
+        nsteps: int = 1,
+        ukm1: torch.Tensor = None,
+        ukm2: torch.Tensor = None,
+    ) -> torch.Tensor:
         """
         Advance u_hat by nsteps steps using the 4th-order symplectic scheme (McLachlan 1993).
 
         Three-stage scheme with w1=w3=(2+2^{1/3}+2^{-1/3})/3, w2=1-2w1.
-        Uses quadratic extrapolation for Picard warm-starts.
+        Warm-starts use MATLAB's history-based quadratic extrapolation (ukm1, ukm2).
+        If ukm1/ukm2 not provided, defaults to u_hat (safe for first step).
         Post-step real round-trip kills imaginary roundoff and re-zeroes k=0 and Nyquist.
         """
         w1 = (2.0 + 2.0 ** (1.0 / 3.0) + 2.0 ** (-1.0 / 3.0)) / 3.0
         w2 = 1.0 - 2.0 * w1
         w3 = w1
 
+        if ukm1 is None:
+            ukm1 = u_hat.clone()
+        if ukm2 is None:
+            ukm2 = u_hat.clone()
+
+        def interp(u0, um1, um2, w):
+            # quadratic extrapolation matching MATLAB's interp lambda
+            return (0.5 * w * (w + 3) + 1) * u0 - w * (w + 2) * um1 + 0.5 * w * (w + 1) * um2
+
         for _ in range(nsteps):
-            y1 = self._solve_midpoint_stage(u_hat, w1)
-            z2_init = 1.5 * y1 - 0.5 * u_hat
+            z1_init = 0.5 * (u_hat + interp(u_hat, ukm1, ukm2, w1))
+            y1 = self._solve_midpoint_stage(u_hat, w1, z_init=z1_init)
+            z2_init = 0.5 * (y1 + interp(u_hat, ukm1, ukm2, w1 + w2))
             y2 = self._solve_midpoint_stage(y1, w2, z_init=z2_init)
-            z3_init = 1.5 * y2 - 0.5 * y1
+            z3_init = 0.5 * (y2 + interp(u_hat, ukm1, ukm2, 1.0))
+            ukm2 = ukm1
+            ukm1 = u_hat
             u_hat = self._solve_midpoint_stage(y2, w3, z_init=z3_init)
             # project back to real and re-FFT: kills imaginary roundoff, zeroes k=0 and Nyquist
             u_hat = self.phys2spec(self.spec2phys(u_hat))
