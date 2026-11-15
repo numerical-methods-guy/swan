@@ -59,9 +59,10 @@ fig, axes = plt.subplots(3, 1, figsize=(14, 8),
                          gridspec_kw={"height_ratios": [3, 1.5, 1.5]})
 
 vmax = np.abs(U).max()
-pcm = axes[0].contourf(
-    t_arr, x_arr, U.T,
-    levels=50, cmap="RdYlBu_r", vmin=-vmax, vmax=vmax,
+pcm = axes[0].imshow(
+    U.T, aspect="auto", origin="lower",
+    extent=[t_arr[0], t_arr[-1], x_arr[0], x_arr[-1]],
+    cmap="RdYlBu_r", vmin=-vmax, vmax=vmax, interpolation="bicubic",
 )
 axes[0].set_ylabel("x")
 axes[0].set_title(f"Long trajectory  [D={D}, E0={E0}, L0={L0}, θ={theta}, T={t_arr[-1]:.0f}]")
