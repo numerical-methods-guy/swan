@@ -30,6 +30,6 @@ echo "Time: $(date)"         | tee -a "$LOGFILE"
 export PYTHONPATH="$REPO"
 cd "$REPO"
 
-$PY tkdv_scripts/plot_long_trajectory.py 2>&1 | tee -a "$LOGFILE"
+$PY -u tkdv_scripts/plot_long_trajectory.py 2>&1 | tee -a "$LOGFILE"
 
 echo "DONE: $(date)" | tee -a "$LOGFILE"
