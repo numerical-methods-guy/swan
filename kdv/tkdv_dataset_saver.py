@@ -201,6 +201,7 @@ def save_metadata(output_folder, args, stats, stability_summary):
         "date":                   datetime.date.today().isoformat(),
         "timestamp":              datetime.datetime.now().isoformat(),
         "git_hash":               get_git_hash(),
+        "seed":                   args.seed,
         "field_mean":             stats["field_mean"],
         "field_var":              stats["field_var"],
         "field_std":              stats["field_std"],
@@ -297,12 +298,20 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--save_dir", type=str, default=None,
                         help="Base directory for output (default: kdv/Saved_Datasets)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Random seed for reproducibility (sets torch and numpy seeds)")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     device = torch.device(args.device)
+
+    if args.seed is not None:
+        import numpy as np
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        print(f"Random seed: {args.seed}")
 
     print(f"\nBuilding solver (J={args.J}, dt_solver={args.dt_solver}, D={args.D}, E0={args.E0}, L0={args.L0})...")
     solver = build_solver(args.J, args.dt_solver, args.D, args.E0, args.L0, device)
