@@ -38,7 +38,7 @@ echo "=== Stability check: dt=1.0 vs dt=0.001 (downstream D=0.24) ===" | tee -a 
 $PY -m kdv.tkdv_dataset_saver \
     --ictype gibbs \
     --J 32 \
-    --dt 0.025 \
+    --dt 1.0 \
     --dt_solver 0.025 \
     --dt_solver_ref 0.001 \
     --D 0.24 \
