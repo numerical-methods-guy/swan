@@ -39,7 +39,7 @@ $PY -m kdv.tkdv_dataset_saver \
     --ictype gibbs \
     --J 32 \
     --dt 1.0 \
-    --dt_solver 0.025 \
+    --dt_solver 0.04 \
     --dt_solver_ref 0.001 \
     --D 0.24 \
     --E0 100.0 \
