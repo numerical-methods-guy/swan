@@ -73,8 +73,10 @@ class TKdVSolver(nn.Module):
         # rfft gives coefficients for k=0..J//2, with pytorch's 1/1 normalisation
         # divide by J to get the standard DFT convention: u_hat[k] = (1/J) sum_j u_j e^{-ikx_j}
         u_hat_full = torch.fft.rfft(u, dim=-1) / self.J
-        # drop k=0 (zero mean) and k>Lambda (truncation), keep k=1..Lambda
-        return u_hat_full[..., 1:self.Lambda + 1]
+        # drop k=0 (zero mean), keep k=1..Lambda-1, zero Nyquist (k=Lambda)
+        result = u_hat_full[..., 1:self.Lambda + 1].clone()
+        result[..., -1] = 0.0  # zero Nyquist mode k=Lambda
+        return result
 
     def spec2phys(self, u_hat: torch.Tensor) -> torch.Tensor:
         """
@@ -192,6 +194,8 @@ class TKdVSolver(nn.Module):
             # stage 3: extrapolate midpoint from stage 2 output and stage 1 output
             z3_init = 1.5 * y2 - 0.5 * y1
             u_hat = self._solve_midpoint_stage(y2, w3, z_init=z3_init)
+            # project back to real and re-FFT to kill imaginary roundoff; zero Nyquist
+            u_hat = self.phys2spec(self.spec2phys(u_hat))
 
         return u_hat
 
@@ -208,10 +212,10 @@ class TKdVSolver(nn.Module):
         Returns:
             scalar Hamiltonian value, shape (...)
         """
-        # H3: go to physical space, integrate u^3 over [-pi, pi]
-        u = self.spec2phys(u_hat)
-        dx = 2.0 * torch.pi / self.J
-        H3 = (1.0 / 6.0) * (u ** 3).sum(dim=-1) * dx
+        # H3: dealiased spectral computation via Parseval
+        # real(sum((u^2)_hat * conj(u_hat))) * 2pi = integral of u^3 dx  (aliasing-free)
+        u2_hat = self._quadratic_dealiased(u_hat)  # = (u^2/2)_hat
+        H3 = (1.0 / 6.0) * 2.0 * torch.pi * (2.0 * u2_hat * u_hat.conj()).real.sum(dim=-1)
 
         # H2: wave slope energy, cheapest in spectral space
         # sum over |k|=1..Lambda (both signs): 2 * pi * sum_{k=1}^Lambda k^2 |u_hat[k]|^2
@@ -257,6 +261,7 @@ class TKdVSolver(nn.Module):
 
         # initialise on the energy sphere: Gaussian -> normalize to E=1
         u_hat = torch.randn(self.Lambda, dtype=torch.complex128, device=device)
+        u_hat[-1] = 0.0  # zero Nyquist mode
         u_hat = u_hat / torch.sqrt(self.energy(u_hat))
 
         H_cur = self.hamiltonian(u_hat)
@@ -267,6 +272,7 @@ class TKdVSolver(nn.Module):
         for step in range(n_total):
             # propose: perturb all modes with Gaussian noise scaled by Lambda
             noise = torch.randn(self.Lambda, dtype=torch.complex128, device=device)
+            noise[-1] = 0.0  # keep Nyquist zero
             w_hat = u_hat + noise / self.Lambda ** 0.5
             # normalize proposal to energy sphere
             w_hat = w_hat / torch.sqrt(self.energy(w_hat))
