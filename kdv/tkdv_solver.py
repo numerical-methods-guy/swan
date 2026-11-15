@@ -126,13 +126,15 @@ class TKdVSolver(nn.Module):
         M = 1.0 / (1.0 - (tau / 2.0) * Lk)
 
         z = a.clone() if z_init is None else z_init
-        for _ in range(n_iter):
+        for i in range(n_iter):
             N_z = -1j * self.k * self.h3_pde * self._quadratic_dealiased(z) / 2.0
             z_new = M * (a + (tau / 2.0) * N_z)
             err = (z_new - z).abs().pow(2).sum().item()
             z = z_new
             if err < tol:
                 break
+        else:
+            print(f"[WARN] Picard did not converge after {n_iter} iters, err={err:.2e}", flush=True)
 
         return 2.0 * z - a
 
