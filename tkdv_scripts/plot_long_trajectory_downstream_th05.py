@@ -44,6 +44,7 @@ with torch.no_grad():
         frames.append(solver.spec2phys(u_hat_cur).cpu().numpy())
         energies.append(solver.energy(u_hat_cur).item())
         if step < n_steps:
+            print(f"  snapshot {step+1}/{n_steps} ...")
             u_hat_cur = solver.timestep(u_hat_cur, nsteps=sub_steps)
 
 H_final = solver.hamiltonian(u_hat_cur).item()
