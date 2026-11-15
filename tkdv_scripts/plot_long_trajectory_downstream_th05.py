@@ -18,8 +18,8 @@ theta  = -0.5
 burnin = 1000
 thin   = 10
 
-dt_solver           = 0.001
-dt_snapshot         = 0.5
+dt_solver           = 0.02
+dt_snapshot         = 10.0
 n_steps             = 20
 sub_steps           = int(dt_snapshot / dt_solver)
 
