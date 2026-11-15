@@ -19,8 +19,8 @@ burnin = 10000
 thin   = 10
 
 dt_solver           = 0.005
-dt_snapshot         = 0.1
-n_steps             = 100
+dt_snapshot         = 0.005
+n_steps             = 20000
 sub_steps           = int(dt_snapshot / dt_solver)
 
 out_png = os.path.join(os.path.dirname(__file__), "long_trajectory_downstream_th05.png")
