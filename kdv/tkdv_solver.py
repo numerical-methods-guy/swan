@@ -18,7 +18,7 @@ class TKdVSolver(nn.Module):
 
     def __init__(
         self,
-        J: int = 33,
+        J: int = 32,
         dt: float = 0.01,
         D: float = 1.0,
         E0: float = 100.0,
@@ -26,7 +26,7 @@ class TKdVSolver(nn.Module):
     ):
         super().__init__()
 
-        assert J % 2 == 1, "J must be odd (J = 2*Lambda + 1)"
+        assert J % 2 == 0, "J must be even"
         self.J = J
         self.Lambda = J // 2
         self.dt = dt
@@ -135,17 +135,33 @@ class TKdVSolver(nn.Module):
         self,
         a: torch.Tensor,
         w: float,
-        n_iter: int = 100,
+        n_iter: int = 1000,
+        tol: float = 1e-12,
     ) -> torch.Tensor:
         """
-        Solve one implicit midpoint stage:
-            y = a + w * dt * F[½(y + a)]
-        via Picard iteration starting from y = a.
+        Solve one implicit midpoint stage y = a + w*dt*F(½(y+a))
+        via IMEX Picard: linear dispersion inverted exactly, nonlinear iterated.
+
+        Substituting z = ½(y+a) gives z = a + (tau/2)*F(z), tau = w*dt.
+        Splitting F(z) = L*z + N(z) where L = ik³ h2_pde (dispersion) and
+        N(z) = -ik h3_pde * P_Λ(z²/2) (nonlinear), the linear part is solved
+        exactly: z = M*(a + tau/2*N(z)), M = 1/(1 - tau/2*ik³ h2_pde).
+        Then y = 2z - a.
         """
-        y = a.clone()
+        tau = w * self.dt
+        Lk = 1j * self.k ** 3 * self.h2_pde          # (Lambda,) linear eigenvalues
+        M = 1.0 / (1.0 - (tau / 2.0) * Lk)           # exact linear inversion
+
+        z = a.clone()
         for _ in range(n_iter):
-            y = a + w * self.dt * self.dudt(0.5 * (y + a))
-        return y
+            N_z = -1j * self.k * self.h3_pde * self._quadratic_dealiased(z)
+            z_new = M * (a + (tau / 2.0) * N_z)
+            err = (z_new - z).abs().pow(2).sum().item()
+            z = z_new
+            if err < tol:
+                break
+
+        return 2.0 * z - a
 
     def timestep(self, u_hat: torch.Tensor, nsteps: int = 1) -> torch.Tensor:
         """

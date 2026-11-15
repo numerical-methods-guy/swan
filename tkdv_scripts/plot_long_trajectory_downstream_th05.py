@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 from kdv.tkdv_solver import TKdVSolver
 
-J      = 33
+J      = 32
 E0     = 100.0
 L0     = 6.0
 D      = 0.24
@@ -18,7 +18,7 @@ theta  = -0.5
 burnin = 1000
 thin   = 10
 
-dt_solver           = 0.005
+dt_solver           = 0.001
 dt_snapshot         = 0.5
 n_steps             = 20
 sub_steps           = int(dt_snapshot / dt_solver)

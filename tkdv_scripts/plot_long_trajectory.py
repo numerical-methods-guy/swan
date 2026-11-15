@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 from kdv.tkdv_solver import TKdVSolver
 
-J      = 33
+J      = 32
 E0     = 100.0
 L0     = 6.0
 D      = 1.0
