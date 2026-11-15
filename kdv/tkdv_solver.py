@@ -5,7 +5,7 @@ import torch.nn as nn
 
 class TKdVSolver(nn.Module):
     """
-    Solver for the truncated KdV (tKdV) equation on a periodic domain x in [-pi, pi].
+    Solver for the truncated KdV (tKdV) equation on a periodic domain x in [-L0*pi/2, L0*pi/2).
 
     The equation (nondimensional, Majda-Moore-Qi 2019) is:
         u_t + D^{-3/2} E0^{1/2} L0^{-3/2} * d/dx P_Lambda(u^2/2)
@@ -32,8 +32,8 @@ class TKdVSolver(nn.Module):
         self.Lambda = J // 2  # kept for reference; state size is now J
         self.dt = dt
 
-        # physical grid x in [-pi, pi), shape (J,)
-        x = torch.linspace(-torch.pi, torch.pi, J + 1)[:-1].double()
+        # physical grid x in [-L0*pi/2, L0*pi/2), shape (J,)
+        x = torch.linspace(-L0 / 2 * torch.pi, L0 / 2 * torch.pi, J + 1)[:-1].double()
         self.register_buffer("x", x)
 
         # wavenumbers in FFT order: [0, 1, ..., J/2, -J/2+1, ..., -1], shape (J,)
