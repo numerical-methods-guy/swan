@@ -15,7 +15,7 @@ E0     = 100.0
 L0     = 6.0
 D      = 0.24
 theta  = -0.5
-burnin = 10000
+burnin = 1000
 thin   = 10
 
 dt_solver           = 0.001
