@@ -314,8 +314,6 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
         np.random.seed(args.seed)
         random.seed(args.seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
         print(f"Random seed: {args.seed}")
 
     print(f"\nBuilding solver (J={args.J}, dt_solver={args.dt_solver}, D={args.D}, E0={args.E0}, L0={args.L0})...")
