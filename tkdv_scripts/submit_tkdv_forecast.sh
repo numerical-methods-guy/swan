@@ -2,7 +2,7 @@
 REPO="/home/avg000/swan"
 PY="/home/avg000/miniconda3/envs/swan/bin/python"
 
-CKPT="/fs/hestia_Heccc/rpnatm/avg000/work/tkdv_datasets/upstream/train_weights/20261116_run2/tkdv_train_upstream_20261116_070010/version_0/checkpoints/pretrain-epoch=883-val_loss=0.4356.ckpt"
+CKPT="/fs/hestia_Heccc/rpnatm/avg000/work/tkdv_datasets/upstream/train_weights/20261116_run4/tkdv_train_upstream_multi_2_20261116_165032/version_0/checkpoints/pretrain-epoch=115-val_loss=0.5569.ckpt"
 STATS="/fs/hestia_Heccc/rpnatm/avg000/work/tkdv_datasets/upstream/train_weights/20261116_run2/stats.pt"
 IC_FOLDER="/fs/hestia_Heccc/rpnatm/avg000/work/tkdv_datasets/samples/seed_7/tkdv_gibbs_dt1.0_dtsolver0.01_20261115"
 OUT="/fs/hestia_Heccc/rpnatm/avg000/work/tkdv_forecast_results"
