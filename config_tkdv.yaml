@@ -1,0 +1,68 @@
+experiment:
+  name: "tkdv_paradis"
+  seed: 42
+  model_type: "paradis"
+
+data:
+  J: 32
+  dt: 1.0
+  dt_solver: 0.01
+  batch_size: 4
+  num_workers: 0
+
+loss:
+  loss_function: "reversed_huber"   # Options: "reversed_huber", "mse", "mae, "amse"
+  delta_loss: 1.0                   # Threshold for the reversed Huber loss
+
+model:
+  paradis:
+    # --- Top-level model parameters ---
+    hidden_dim: 32        # cfg.model.latent_size in upstream
+    num_layers: 4         # Number of ADR layers
+    num_vels: 6           # cfg.model.velocity_vectors in upstream
+    base_dt: 21600        # Must match data.dt; cfg.model.base_dt in upstream
+    interpolation: "bicubic"  # cfg.model.adv_interpolation in upstream; "bilinear" or "bicubic"
+    bias_channels: 2      # cfg.model.bias_channels in upstream
+    activation: "SiLU"    # cfg.model.activation in upstream; "SiLU" or "GELU"
+
+    # --- Sub-block architecture (cfg.model.physblock in upstream) ---
+    # layers: sequence of block types applied in order
+    # hidden_dim: width of intermediate channels between layers (0 = use input/output dim)
+    physblock:
+      input_proj:
+        layers: ["SepConv", "CLinear"]
+        hidden_dim: 32
+      velocity_net:
+        layers: ["SepConv"]
+        hidden_dim: 32
+      diffusion:
+        layers: ["SepConv"]
+        hidden_dim: 16
+      reaction:
+        layers: ["CLinear", "CLinear"]
+        hidden_dim: 16
+      output_proj:
+        layers: ["SepConv", "CLinear"]
+        hidden_dim: 32
+      advection:
+        down_projection:
+          layers: ["CLinear"]
+          hidden_dim: 0
+        up_projection:
+          layers: ["SepConv"]
+          hidden_dim: 0
+
+training:
+  learning_rate: 1.0e-2
+  finetune_learning_rate: 1.0e-3
+  pretrain_epochs: 25
+  finetune_epochs: 0
+  nfuture: 1
+  amp_mode: "none"      # Options: "none", "fp16", "bf16"
+  log_every_n_steps: 10
+  save_dir: "./logs"
+  gradient_checkpointing: false  # cfg.compute.gradient_checkpointing in upstream
+  # Deterministic LR schedule: decay by lr_gamma at each milestone epoch.
+  # Remove these two keys to fall back to ReduceLROnPlateau.
+  lr_milestones: [10, 16]
+  lr_gamma: 0.5
