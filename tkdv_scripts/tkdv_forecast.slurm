@@ -36,7 +36,7 @@ nvidia-smi 2>&1              | tee -a "$LOGFILE" || true
 export PYTHONPATH="$REPO"
 cd "$REPO"
 
-$PY tkdv_scripts/tkdv_forecast.py \
+$PY tkdv_forecast.py \
   --config config_tkdv.yaml \
   --checkpoint "$CKPT" \
   --stats_path "$STATS" \
