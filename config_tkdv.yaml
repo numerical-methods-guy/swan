@@ -20,8 +20,7 @@ model:
     hidden_dim: 32        # cfg.model.latent_size in upstream
     num_layers: 4         # Number of ADR layers
     num_vels: 6           # cfg.model.velocity_vectors in upstream
-    base_dt: 21600        # Must match data.dt; cfg.model.base_dt in upstream
-    interpolation: "bicubic"  # cfg.model.adv_interpolation in upstream; "bilinear" or "bicubic"
+    base_dt: 1.0          # Must match data.dt; cfg.model.base_dt in upstream
     bias_channels: 2      # cfg.model.bias_channels in upstream
     activation: "SiLU"    # cfg.model.activation in upstream; "SiLU" or "GELU"
 
