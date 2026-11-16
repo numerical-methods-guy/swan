@@ -189,29 +189,31 @@ def _run_single_ic_inference(
     inp_std  = torch.sqrt(inp_var)
     solver   = dataset.solver
 
-    # dataset returns (inp, tar): inp shape (J,), tar shape (n_rollout_steps, J) — unnormalized
+    # dataset returns normalized (inp, tar): inp shape (J,), tar shape (n_rollout_steps, J)
     inp_fields, tar_fields = dataset[ic_index]
     inp_fields = inp_fields.to(device)
     tar_fields  = tar_fields.to(device)
     n_metric_steps = min(autoreg_steps, tar_fields.shape[0])
 
+    # unnormalized IC for the reference solver
+    inp_phys = inp_fields * inp_std + inp_mean   # (J,) physical
+
     # --- Timing pass: ML model ---
-    prd = (inp_fields - inp_mean) / inp_std   # (J,) normalized
-    prd = prd.unsqueeze(0).unsqueeze(0)        # (1, 1, J)
+    prd = inp_fields.unsqueeze(0).unsqueeze(0)   # (1, 1, J) normalized
 
     if device.type == "cuda":
         torch.cuda.synchronize()
     ml_start = time.perf_counter()
 
     for _ in range(autoreg_steps):
-        prd = model.model(prd)                 # (1, 1, J) normalized
+        prd = model.model(prd)                   # (1, 1, J) normalized
 
     if device.type == "cuda":
         torch.cuda.synchronize()
     ml_time = time.perf_counter() - ml_start
 
     # --- Timing pass: reference numerical solver ---
-    u_hat_ref = solver.phys2spec(inp_fields)
+    u_hat_ref = solver.phys2spec(inp_phys)
 
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -225,34 +227,31 @@ def _run_single_ic_inference(
     solver_time = time.perf_counter() - solver_start
 
     # --- Metrics and output pass ---
-    prd = (inp_fields - inp_mean) / inp_std
-    prd = prd.unsqueeze(0).unsqueeze(0)        # (1, 1, J) normalized
+    prd = inp_fields.unsqueeze(0).unsqueeze(0)   # (1, 1, J) normalized
 
     step_metrics = {key: [] for key in metrics_dict.keys()}
     step_metrics["loss"] = []
 
-    # collect full trajectories for plotting
-    pred_frames  = [inp_fields.cpu().numpy()]
-    truth_frames = [inp_fields.cpu().numpy()]
+    # collect full trajectories for plotting (physical / unnormalized)
+    pred_frames  = [inp_phys.cpu().numpy()]
+    truth_frames = [inp_phys.cpu().numpy()]
 
     for step in range(1, autoreg_steps + 1):
-        prd = model.model(prd)                 # (1, 1, J) normalized
-        prd_phys = prd.squeeze(0).squeeze(0) * inp_std + inp_mean   # (J,) unnormalized
+        prd = model.model(prd)                              # (1, 1, J) normalized
+        prd_phys = prd.squeeze(0).squeeze(0) * inp_std + inp_mean   # (J,) physical
         pred_frames.append(prd_phys.cpu().numpy())
 
         if step <= n_metric_steps:
-            ref_phys = tar_fields[step - 1]    # (J,) unnormalized
+            ref_norm = tar_fields[step - 1]                # (J,) normalized
+            ref_phys = ref_norm * inp_std + inp_mean       # (J,) physical
             truth_frames.append(ref_phys.cpu().numpy())
-
-            ref_norm = (ref_phys - inp_mean) / inp_std
-            prd_norm = (prd_phys - inp_mean) / inp_std
 
             for name, metric_fn in metrics_dict.items():
                 step_metrics[name].append(
-                    metric_fn(prd_norm.unsqueeze(0), ref_norm.unsqueeze(0)).item()
+                    metric_fn(prd.squeeze(0), ref_norm.unsqueeze(0)).item()
                 )
             step_metrics["loss"].append(
-                loss_fn(prd_norm.unsqueeze(0), ref_norm.unsqueeze(0)).item()
+                loss_fn(prd.squeeze(0), ref_norm.unsqueeze(0)).item()
             )
         else:
             # pad truth trajectory with last available frame if autoreg_steps > n_metric_steps
@@ -549,7 +548,7 @@ def main():
         initial_condition="precomputed",
         num_examples=args.num_ics,
         device=device,
-        normalize=False,
+        normalize=True,
         precomputed_folder=args.precomputed_folder,
     )
 
