@@ -24,7 +24,7 @@ sbatch --job-name="tkdv_forecast" \
     --precomputed_folder '$IC_FOLDER' \
     --num_ics 1 \
     --ic_start_index 0 \
-    --autoreg_steps 40 \
+    --autoreg_steps 12 \
     --output_dir '$OUT' \
     --device cuda \
     --model.paradis.hidden_dim 24 \
