@@ -69,7 +69,7 @@ def _plot_spacetime(pred_traj, truth_traj, x_arr, t_arr, out_path):
     ]:
         pcm = ax.imshow(
             data, aspect="auto", origin="lower", extent=extent,
-            cmap=cmap, vmin=-vm, vmax=vm, interpolation="bicubic",
+            cmap=cmap, vmin=-vm, vmax=vm, interpolation="nearest",
         )
         ax.set_xlabel("time")
         ax.set_ylabel("x")
